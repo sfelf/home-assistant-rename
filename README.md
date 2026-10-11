@@ -3,6 +3,8 @@
   <img alt="Home Assistant Rename" src="assets/banner-light.svg" width="100%">
 </picture>
 
+---
+
 [![Release](https://img.shields.io/github/v/release/sfelf/homeassistant-rename)](https://github.com/sfelf/homeassistant-rename/releases/latest)
 [![Tests](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml/badge.svg)](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/sfelf/homeassistant-rename/graph/badge.svg)](https://codecov.io/gh/sfelf/homeassistant-rename)
