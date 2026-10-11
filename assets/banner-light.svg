@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 500" width="1280" height="500" role="img" aria-labelledby="title" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+  <title id="title">Home Assistant Rename: bulk-rename entities from the command line</title>
+  <rect width="1280" height="500" rx="12" fill="#F6F8FA"/>
+  <path d="M70 82 L114 42 L158 82 L158 122 L70 122 Z" fill="none" stroke="#1F2328" stroke-width="6" stroke-linejoin="round"/>
+  <rect x="112" y="84" width="4" height="27" fill="#0969DA"/>
+  <rect x="106" y="81" width="16" height="4" rx="1" fill="#0969DA"/>
+  <rect x="106" y="110" width="16" height="4" rx="1" fill="#0969DA"/>
+  <text x="180" y="88" fill="#1F2328" font-size="46" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="500">Home Assistant Rename</text>
+  <text x="182" y="122" fill="#59636E" font-size="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">Bulk-rename entities from the command line</text>
+  <rect x="60" y="165" width="1160" height="300" rx="12" fill="#FFFFFF" stroke="#D0D7DE" stroke-width="2"/>
+  <circle cx="92" cy="195" r="7" fill="#F0605A"/>
+  <circle cx="116" cy="195" r="7" fill="#F4BF4F"/>
+  <circle cx="140" cy="195" r="7" fill="#5DC453"/>
+  <text x="640" y="200" text-anchor="middle" fill="#59636E" font-size="18">ha-rename</text>
+  <text x="100" y="258" fill="#59636E" font-size="22">$ ha-rename --old-id-prefix … --new-id-prefix … --entity-name-prefix …</text>
+  <text x="100" y="315" fill="#CF222E" font-size="30" text-decoration="line-through">sensor.skyvane_skyvane_station_backyard_station_temperature</text>
+  <text x="100" y="368" fill="#59636E" font-size="30">→</text>
+  <text x="146" y="368" fill="#1A7F37" font-size="30">sensor.skyvane_station_temperature</text>
+  <text x="100" y="428" font-size="26" xml:space="preserve"><tspan fill="#59636E">name: </tspan><tspan fill="#CF222E" text-decoration="line-through">'Backyard Station Temperature'</tspan><tspan fill="#59636E"> → </tspan><tspan fill="#1A7F37">'Temperature'</tspan></text>
+</svg>

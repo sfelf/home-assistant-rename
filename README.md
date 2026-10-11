@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg">
+  <img alt="Home Assistant Rename: bulk-rename entities from the command line" src="assets/banner-light.svg" width="100%">
+</picture>
+
 # Home Assistant Rename
 
 Bulk-rename [Home Assistant](https://www.home-assistant.io/) entities from the command line.
