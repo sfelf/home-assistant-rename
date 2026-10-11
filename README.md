@@ -5,7 +5,7 @@
 
 ---
 
-[![Release](https://img.shields.io/github/v/release/sfelf/homeassistant-rename)](https://github.com/sfelf/homeassistant-rename/releases/latest)
+[![Release](https://img.shields.io/github/v/release/sfelf/homeassistant-rename?sort=semver)](https://github.com/sfelf/homeassistant-rename/releases/latest)
 [![Tests](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml/badge.svg)](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/sfelf/homeassistant-rename/graph/badge.svg)](https://codecov.io/gh/sfelf/homeassistant-rename)
 [![Python 3.11 | 3.12 | 3.13 | 3.14](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://github.com/sfelf/homeassistant-rename/blob/main/pyproject.toml)
