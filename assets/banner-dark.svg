@@ -1,12 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 500" width="1280" height="500" role="img" aria-labelledby="title" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
   <title id="title">Home Assistant Rename: bulk-rename entities from the command line</title>
-  <rect width="1280" height="500" rx="12" fill="#0D1117"/>
-  <path d="M70 82 L114 42 L158 82 L158 122 L70 122 Z" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linejoin="round"/>
-  <rect x="112" y="84" width="4" height="27" fill="#85D0F5"/>
-  <rect x="106" y="81" width="16" height="4" rx="1" fill="#85D0F5"/>
-  <rect x="106" y="110" width="16" height="4" rx="1" fill="#85D0F5"/>
-  <text x="180" y="88" fill="#E6EDF3" font-size="46" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="500">Home Assistant Rename</text>
-  <text x="182" y="122" fill="#8B949E" font-size="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">Bulk-rename entities from the command line</text>
+  <rect width="1280" height="500" rx="12" fill="#12497A"/>
+  <path d="M70.0 78.7 L114.0 42.0 L158.0 78.7 L158.0 117.8 L70.0 117.8 Z" fill="none" stroke="#FFFFFF" stroke-width="5.9" stroke-linejoin="round" stroke-linecap="round"/>
+  <rect x="111.1" y="73.8" width="5.9" height="30.3" rx="1.5" fill="#85D0F5"/>
+  <rect x="104.2" y="71.8" width="19.6" height="3.9" rx="1.5" fill="#85D0F5"/>
+  <rect x="104.2" y="102.1" width="19.6" height="3.9" rx="1.5" fill="#85D0F5"/>
+  <text x="180" y="88" fill="#FFFFFF" font-size="46" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="500">Home Assistant Rename</text>
+  <text x="182" y="122" fill="#B5D4F4" font-size="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">Bulk-rename entities from the command line</text>
   <rect x="60" y="165" width="1160" height="300" rx="12" fill="#161B22" stroke="#30363D" stroke-width="2"/>
   <circle cx="92" cy="195" r="7" fill="#F0605A"/>
   <circle cx="116" cy="195" r="7" fill="#F4BF4F"/>
