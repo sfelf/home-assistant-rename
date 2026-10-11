@@ -78,6 +78,15 @@ class TestParser:
         assert exc.value.code == 2
         assert option in capsys.readouterr().err
 
+    @pytest.mark.parametrize("old, new", [("sky_old_", "sky_new"), ("sky_old", "sky_new_")])
+    def test_mismatched_underscores_rejected_before_connecting(self, old, new, capsys):
+        argv = ["--old-id-prefix", old, "--new-id-prefix", new, "--entity-name-prefix", "X"]
+        # The autouse no_prompt fixture proves we exit before asking for a token.
+        with pytest.raises(SystemExit) as exc:
+            cli.main(argv)
+        assert exc.value.code == 2
+        assert "ends with '_'" in capsys.readouterr().err
+
     def test_help_documents_everything(self, capsys):
         with pytest.raises(SystemExit) as exc:
             cli.build_parser().parse_args(["--help"])

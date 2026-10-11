@@ -1,6 +1,12 @@
 import pytest
 
-from ha_rename.rename import Rename, plan_renames, strip_name_prefix, validate_id_prefix
+from ha_rename.rename import (
+    Rename,
+    check_prefix_separators,
+    plan_renames,
+    strip_name_prefix,
+    validate_id_prefix,
+)
 from tests.conftest import SAMPLE_ENTITIES, entity
 
 OLD = "skyvane_skyvane_station_backyard_station_"
@@ -23,6 +29,28 @@ class TestValidateIdPrefix:
     def test_rejects_invalid_characters(self, prefix):
         with pytest.raises(ValueError, match="not a valid entity ID prefix"):
             validate_id_prefix(prefix, allow_empty=True)
+
+
+class TestCheckPrefixSeparators:
+    @pytest.mark.parametrize("old, new", [
+        ("sky_", "vane_"),
+        ("kitchen", "lounge"),
+        ("sky_", ""),
+        ("kitchen", ""),
+    ])
+    def test_allowed(self, old, new):
+        check_prefix_separators(old, new)
+
+    def test_new_prefix_missing_underscore(self):
+        with pytest.raises(ValueError, match="would run together") as exc:
+            check_prefix_separators("sky_old_", "skyvane_station")
+        assert "'skyvane_station_'" in str(exc.value)
+
+    def test_old_prefix_missing_underscore(self):
+        with pytest.raises(ValueError, match="double underscore") as exc:
+            check_prefix_separators("sky_old", "skyvane_station_")
+        assert "'sky_old_'" in str(exc.value)
+        assert "'skyvane_station'" in str(exc.value)
 
 
 class TestStripNamePrefix:

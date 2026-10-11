@@ -9,7 +9,7 @@ import shtab
 import websockets
 
 from ha_rename import __version__, client, credentials
-from ha_rename.rename import plan_renames, validate_id_prefix
+from ha_rename.rename import check_prefix_separators, plan_renames, validate_id_prefix
 
 DEFAULT_URL = "ws://homeassistant.local:8123/api/websocket"
 
@@ -80,7 +80,8 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         metavar="PREFIX",
         type=_id_prefix(allow_empty=True),
-        help='replacement entity ID prefix, e.g. skyvane_station_ (may be "" to just remove the old prefix)',
+        help="replacement entity ID prefix, e.g. skyvane_station_; must end with '_' if "
+        '--old-id-prefix does (may be "" to just remove the old prefix)',
     )
     required.add_argument(
         "--entity-name-prefix",
@@ -161,7 +162,12 @@ def _error(message: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        check_prefix_separators(args.old_id_prefix, args.new_id_prefix)
+    except ValueError as e:
+        parser.error(str(e))
     url = args.ha_url
 
     try:

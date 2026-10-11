@@ -140,7 +140,7 @@ When you're happy with the preview, run the same command without `--dry-run`.
 | Option | Required | Description |
 | --- | --- | --- |
 | `--old-id-prefix PREFIX` | yes | Entity ID prefix to match and replace, e.g. `skyvane_skyvane_station_backyard_station_`. Matched against the part of the ID after `<domain>.`. Lowercase letters, digits and underscores only. |
-| `--new-id-prefix PREFIX` | yes | Replacement for the old prefix, e.g. `skyvane_station_`. Pass `""` to remove the old prefix. Lowercase letters, digits and underscores only. |
+| `--new-id-prefix PREFIX` | yes | Replacement for the old prefix, e.g. `skyvane_station_`. Pass `""` to remove the old prefix. Lowercase letters, digits and underscores only. Must end with `_` exactly when `--old-id-prefix` does; otherwise the tool stops with an error, since the IDs would run together (`skyvane_stationtemperature`) or get a double underscore. |
 | `--entity-name-prefix TEXT` | yes | Text to remove from the start of matching entity names, e.g. `"Backyard Station"`. Quote it if it contains spaces. |
 | `--ha-url URL` | no | Home Assistant WebSocket API URL. Default: `ws://homeassistant.local:8123/api/websocket`. Use `wss://<host>/api/websocket` if Home Assistant is served over HTTPS (e.g. via Nabu Casa or a reverse proxy). |
 | `--dry-run` | no | Show what would change without changing anything. |
@@ -215,7 +215,12 @@ Code layout (`src/ha_rename/`):
 
 The [Release workflow](.github/workflows/release.yml) checks that the tag matches the
 version in `pyproject.toml`, runs the full test suite, builds the wheel and source
-archive, and publishes a GitHub Release with them attached and generated release notes.
+archive, and creates a **draft** GitHub Release with them attached and generated
+release notes.
+
+3. Review and edit the notes on the draft under
+   [Releases](https://github.com/sfelf/homeassistant-rename/releases), then click
+   **Publish release**. Nothing is public until you do.
 
 ## License
 

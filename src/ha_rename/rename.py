@@ -20,6 +20,28 @@ def validate_id_prefix(prefix: str, *, allow_empty: bool) -> str:
     return prefix
 
 
+def check_prefix_separators(old_prefix: str, new_prefix: str) -> None:
+    """Raise ValueError if only one of the prefixes ends with an underscore.
+
+    Prefixes are swapped as plain text, so a mismatch runs words together
+    (``skyvane_station`` + ``temperature``) or doubles the separator. An empty
+    ``new_prefix`` (just remove the old one) is always allowed.
+    """
+    if not new_prefix or old_prefix.endswith("_") == new_prefix.endswith("_"):
+        return
+    if old_prefix.endswith("_"):
+        raise ValueError(
+            f"--old-id-prefix {old_prefix!r} ends with '_' but --new-id-prefix {new_prefix!r} "
+            f"doesn't, so new IDs would run together (e.g. '{new_prefix}temperature'); "
+            f"use --new-id-prefix {new_prefix + '_'!r}"
+        )
+    raise ValueError(
+        f"--new-id-prefix {new_prefix!r} ends with '_' but --old-id-prefix {old_prefix!r} "
+        f"doesn't, so new IDs would get a double underscore (e.g. '{new_prefix}_temperature'); "
+        f"use --old-id-prefix {old_prefix + '_'!r} or --new-id-prefix {new_prefix.rstrip('_')!r}"
+    )
+
+
 @dataclass(frozen=True)
 class Rename:
     """A planned change to one entity registry entry."""

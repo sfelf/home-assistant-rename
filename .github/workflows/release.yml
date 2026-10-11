@@ -32,7 +32,7 @@ jobs:
       id-token: write
 
   release:
-    name: Build and publish GitHub release
+    name: Build and draft GitHub release
     needs: test
     runs-on: ubuntu-latest
     permissions:
@@ -54,4 +54,5 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" dist/* \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
-            --verify-tag
+            --verify-tag \
+            --draft
