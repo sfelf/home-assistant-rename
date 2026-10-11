@@ -3,6 +3,7 @@
   <img alt="Home Assistant Rename" src="assets/banner-light.svg" width="100%">
 </picture>
 
+[![Release](https://img.shields.io/github/v/release/sfelf/homeassistant-rename)](https://github.com/sfelf/homeassistant-rename/releases/latest)
 [![Tests](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml/badge.svg)](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/sfelf/homeassistant-rename/graph/badge.svg)](https://codecov.io/gh/sfelf/homeassistant-rename)
 [![Python 3.11 | 3.12 | 3.13 | 3.14](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://github.com/sfelf/homeassistant-rename/blob/main/pyproject.toml)
@@ -49,20 +50,26 @@ will change.
 
 ## Installation
 
-With [uv](https://docs.astral.sh/uv/):
+Install a release (see [Releases](https://github.com/sfelf/homeassistant-rename/releases)
+for the latest version) with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv tool install git+https://github.com/sfelf/homeassistant-rename.git
+uv tool install git+https://github.com/sfelf/homeassistant-rename.git@v0.1.0
 ```
 
 Or with [pipx](https://pipx.pypa.io/):
 
 ```bash
-pipx install git+https://github.com/sfelf/homeassistant-rename.git
+pipx install git+https://github.com/sfelf/homeassistant-rename.git@v0.1.0
 ```
 
-Either command puts `ha-rename` on your `PATH`. To upgrade later, run
-`uv tool upgrade ha-rename` or `pipx upgrade ha-rename`.
+Either command puts `ha-rename` on your `PATH`. To move to a newer release, run the
+same command with the new version and `--force`, for example
+`uv tool install --force git+https://github.com/sfelf/homeassistant-rename.git@v0.2.0`.
+
+To try the latest unreleased changes instead, leave off the `@v…` suffix. Each release
+also has a wheel attached, which you can install directly with
+`uv tool install <wheel URL>`.
 
 ## Getting an access token
 
@@ -193,6 +200,20 @@ Code layout (`src/ha_rename/`):
 - `rename.py`: works out which entities to rename and how (no I/O)
 - `client.py`: minimal Home Assistant WebSocket API client
 - `credentials.py`: saves the access token in the system keyring and prompts for it
+
+### Releasing
+
+1. Bump the version in `pyproject.toml`, e.g. `uv version --bump minor`, and commit it.
+2. Tag the commit and push the tag:
+
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+The [Release workflow](.github/workflows/release.yml) checks that the tag matches the
+version in `pyproject.toml`, runs the full test suite, builds the wheel and source
+archive, and publishes a GitHub Release with them attached and generated release notes.
 
 ## License
 
