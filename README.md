@@ -4,6 +4,9 @@
 </picture>
 
 [![Tests](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml/badge.svg)](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsfelf%2Fhomeassistant-rename%2Fbadges%2Fcoverage.json)](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml)
+[![Python 3.11 | 3.12 | 3.13 | 3.14](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://github.com/sfelf/homeassistant-rename/blob/main/pyproject.toml)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
 Bulk-rename [Home Assistant](https://www.home-assistant.io/) entities from the command line.
 
@@ -190,3 +193,12 @@ Code layout (`src/ha_rename/`):
 - `rename.py`: works out which entities to rename and how (no I/O)
 - `client.py`: minimal Home Assistant WebSocket API client
 - `credentials.py`: saves the access token in the system keyring and prompts for it
+
+## License
+
+Copyright (C) 2026 Thomas Nelson
+
+This program is free software: you can redistribute it and/or modify it under the
+terms of the GNU Affero General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later version.
+See [LICENSE](LICENSE) for the full text.

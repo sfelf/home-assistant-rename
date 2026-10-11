@@ -3,15 +3,32 @@ name = "ha-rename"
 version = "0.1.0"
 description = "Bulk-rename Home Assistant entities via the WebSocket API"
 readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 authors = [
     { name = "Thomas Nelson", email = "1295690+sfelf@users.noreply.github.com" }
 ]
 requires-python = ">=3.11"
+keywords = ["home-assistant", "cli", "entity-registry", "rename"]
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Home Automation",
+]
 dependencies = [
     "keyring>=25.7.0",
     "shtab>=1.12.1",
     "websockets>=17.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/sfelf/homeassistant-rename"
+Issues = "https://github.com/sfelf/homeassistant-rename/issues"
 
 [project.scripts]
 ha-rename = "ha_rename.cli:main"
@@ -32,3 +49,4 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 branch = true
+patch = ["subprocess"]
