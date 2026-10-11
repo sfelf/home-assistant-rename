@@ -5,6 +5,8 @@
 
 # Home Assistant Rename
 
+[![Tests](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml/badge.svg)](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml)
+
 Bulk-rename [Home Assistant](https://www.home-assistant.io/) entities from the command line.
 
 Some integrations create entities with long, repetitive IDs and names. For example,
