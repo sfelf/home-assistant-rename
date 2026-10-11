@@ -4,7 +4,7 @@
 </picture>
 
 [![Tests](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml/badge.svg)](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsfelf%2Fhomeassistant-rename%2Fbadges%2Fcoverage.json)](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/sfelf/homeassistant-rename/graph/badge.svg)](https://codecov.io/gh/sfelf/homeassistant-rename)
 [![Python 3.11 | 3.12 | 3.13 | 3.14](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://github.com/sfelf/homeassistant-rename/blob/main/pyproject.toml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
