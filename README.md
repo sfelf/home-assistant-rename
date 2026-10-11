@@ -1,9 +1,7 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg">
-  <img alt="Home Assistant Rename: bulk-rename entities from the command line" src="assets/banner-light.svg" width="100%">
+  <img alt="Home Assistant Rename" src="assets/banner-light.svg" width="100%">
 </picture>
-
-# Home Assistant Rename
 
 [![Tests](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml/badge.svg)](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml)
 
