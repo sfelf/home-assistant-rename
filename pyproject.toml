@@ -1,0 +1,34 @@
+[project]
+name = "ha-rename"
+version = "0.1.0"
+description = "Bulk-rename Home Assistant entities via the WebSocket API"
+readme = "README.md"
+authors = [
+    { name = "Thomas Nelson", email = "1295690+sfelf@users.noreply.github.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "keyring>=25.7.0",
+    "shtab>=1.12.1",
+    "websockets>=17.2",
+]
+
+[project.scripts]
+ha-rename = "ha_rename.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.22,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.pytest.ini_options]
+addopts = "--cov=ha_rename --cov-report=term-missing"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
