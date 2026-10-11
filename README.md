@@ -1,4 +1,4 @@
-# ha-rename
+# Home Assistant Rename
 
 Bulk-rename [Home Assistant](https://www.home-assistant.io/) entities from the command line.
 
