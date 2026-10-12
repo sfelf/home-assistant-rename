@@ -27,8 +27,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/sfelf/homeassistant-rename"
-Issues = "https://github.com/sfelf/homeassistant-rename/issues"
+Homepage = "https://github.com/sfelf/home-assistant-rename"
+Issues = "https://github.com/sfelf/home-assistant-rename/issues"
 
 [project.scripts]
 ha-rename = "ha_rename.cli:main"
