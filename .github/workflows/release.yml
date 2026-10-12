@@ -27,9 +27,7 @@ jobs:
   test:
     needs: check-version
     uses: ./.github/workflows/tests.yml
-    permissions:
-      contents: read
-      id-token: write
+    secrets: inherit
 
   release:
     name: Build and draft GitHub release

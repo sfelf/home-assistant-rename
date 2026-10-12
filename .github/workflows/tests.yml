@@ -34,9 +34,6 @@ jobs:
   test:
     name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-      id-token: write  # lets the Codecov upload authenticate via OIDC, no token secret needed
     strategy:
       fail-fast: false
       matrix:
@@ -64,8 +61,11 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
-          use_oidc: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) }}
+          # Codecov requires a token for uploads. Pull requests from forks can't read
+          # secrets; Codecov accepts those uploads without one for public repos.
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.xml
+          disable_search: true
           flags: ${{ matrix.os }}-py${{ matrix.python-version }}
 
   # Single check for branch protection to require, so it doesn't need updating
