@@ -66,6 +66,7 @@ jobs:
         with:
           use_oidc: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) }}
           files: coverage.xml
+          disable_search: true  # upload only coverage.xml, not other files the uploader finds
           flags: ${{ matrix.os }}-py${{ matrix.python-version }}
 
   # Single check for branch protection to require, so it doesn't need updating
