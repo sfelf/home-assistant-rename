@@ -1,10 +1,12 @@
+import json
 import subprocess
 import sys
 
 import pytest
 
 from ha_rename import __version__, cli
-from tests.conftest import GOOD_TOKEN
+from ha_rename.undo import UndoLog
+from tests.conftest import GOOD_TOKEN, SAMPLE_ENTITIES
 
 PREFIX_ARGS = [
     "--old-id-prefix",
@@ -42,7 +44,9 @@ class TestParser:
 
     def test_defaults(self):
         args = self.parse()
-        assert args.ha_url == cli.DEFAULT_URL
+        assert args.ha_url is None  # resolved to DEFAULT_URL (or the undo file's URL) in main
+        assert args.undo is None
+        assert args.undo_file is None
         assert args.dry_run is False
         assert args.reset_token is False
         assert args.old_id_prefix == "skyvane_skyvane_station_backyard_station_"
@@ -66,13 +70,19 @@ class TestParser:
     @pytest.mark.parametrize(
         "missing", ["--old-id-prefix", "--new-id-prefix", "--entity-name-prefix"]
     )
-    def test_prefixes_are_required(self, missing, capsys):
+    def test_prefixes_are_required_without_undo(self, missing, capsys):
         i = PREFIX_ARGS.index(missing)
         argv = PREFIX_ARGS[:i] + PREFIX_ARGS[i + 2 :]
         with pytest.raises(SystemExit) as exc:
-            cli.build_parser().parse_args(argv)
+            cli.main(argv)
         assert exc.value.code == 2
-        assert missing in capsys.readouterr().err
+        assert f"the following arguments are required: {missing}" in capsys.readouterr().err
+
+    def test_all_prefixes_listed_when_none_given(self, capsys):
+        with pytest.raises(SystemExit):
+            cli.main([])
+        err = capsys.readouterr().err
+        assert "required: --old-id-prefix, --new-id-prefix, --entity-name-prefix" in err
 
     @pytest.mark.parametrize(
         "option, value",
@@ -295,6 +305,201 @@ class TestMain:
 
         monkeypatch.setattr("asyncio.run", interrupt)
         assert cli.main(PREFIX_ARGS) == 130
+
+
+def undo_files(directory):
+    return sorted(directory.glob("ha-rename-undo-*.json"))
+
+
+def stored(memory_keyring, fake_ha):
+    store(memory_keyring, fake_ha.url)
+    return fake_ha
+
+
+class TestUndoFile:
+    def test_apply_writes_undo_file(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        stored(memory_keyring, fake_ha)
+        assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 0
+        [path] = undo_files(in_tmp_dir)
+        data = json.loads(path.read_text())
+        assert data["ha_url"] == fake_ha.url
+        assert data["changes"] == [
+            {
+                "entity_id": "sensor.skyvane_skyvane_station_backyard_station_temperature",
+                "new_entity_id": "sensor.skyvane_station_temperature",
+                "name": None,
+                "new_name": "Temperature",
+            },
+            {
+                "entity_id": "switch.skyvane_skyvane_station_backyard_station_heater",
+                "new_entity_id": "switch.skyvane_station_heater",
+                "name": "Backyard Station Heater",
+                "new_name": "Heater",
+            },
+            {
+                "entity_id": "sensor.skyvane_skyvane_station_backyard_station_humidity",
+                "new_entity_id": "sensor.skyvane_station_humidity",
+                "name": None,
+                "new_name": None,
+            },
+        ]
+        out = capsys.readouterr().out
+        assert f"Undo file: {path.name}" in out
+        assert f"To reverse these changes, run: ha-rename --undo {path.name}" in out
+
+    def test_undo_file_option(self, fake_ha, memory_keyring, in_tmp_dir):
+        stored(memory_keyring, fake_ha)
+        target = in_tmp_dir / "my undo.json"
+        assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url, "--undo-file", str(target)]) == 0
+        assert len(json.loads(target.read_text())["changes"]) == 3
+        assert undo_files(in_tmp_dir) == []
+
+    def test_dry_run_writes_no_undo_file(self, fake_ha, memory_keyring, in_tmp_dir):
+        stored(memory_keyring, fake_ha)
+        assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url, "--dry-run"]) == 0
+        assert list(in_tmp_dir.iterdir()) == []
+
+    def test_no_changes_writes_no_undo_file(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        stored(memory_keyring, fake_ha)
+        argv = ["--old-id-prefix", "nothing_", "--new-id-prefix", "else_"]
+        assert cli.main([*argv, "--entity-name-prefix", "X", "--ha-url", fake_ha.url]) == 0
+        assert list(in_tmp_dir.iterdir()) == []
+        assert "Undo file" not in capsys.readouterr().out
+
+    def test_only_successful_updates_are_recorded(self, fake_ha, memory_keyring, in_tmp_dir):
+        stored(memory_keyring, fake_ha)
+        fake_ha.fail_updates = {"switch.skyvane_skyvane_station_backyard_station_heater"}
+        assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 1
+        [path] = undo_files(in_tmp_dir)
+        recorded = [c["entity_id"] for c in json.loads(path.read_text())["changes"]]
+        assert "switch.skyvane_skyvane_station_backyard_station_heater" not in recorded
+        assert len(recorded) == 2
+
+    def test_all_updates_failing_leaves_no_undo_file(self, fake_ha, memory_keyring, in_tmp_dir):
+        stored(memory_keyring, fake_ha)
+        fake_ha.fail_updates = {e["entity_id"] for e in fake_ha.entities}
+        assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 1
+        assert list(in_tmp_dir.iterdir()) == []
+
+    def test_unwritable_undo_file_changes_nothing(
+        self, fake_ha, memory_keyring, in_tmp_dir, capsys
+    ):
+        stored(memory_keyring, fake_ha)
+        existing = in_tmp_dir / "taken.json"
+        existing.write_text("{}")
+        argv = [*PREFIX_ARGS, "--ha-url", fake_ha.url, "--undo-file", str(existing)]
+        assert cli.main(argv) == 1
+        assert fake_ha.updates == []
+        assert "could not create undo file" in capsys.readouterr().err
+
+    def test_undo_file_update_failure_stops_run(self, fake_ha, memory_keyring, monkeypatch, capsys):
+        stored(memory_keyring, fake_ha)
+
+        def fail(*args):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr("os.replace", fail)
+        assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 1
+        assert len(fake_ha.updates) == 1  # stopped after the first change
+        assert "isn't in the undo file" in capsys.readouterr().err
+
+
+def test_default_undo_path_is_numbered_when_taken(in_tmp_dir, monkeypatch):
+    first = cli.default_undo_path()
+    assert first.name.startswith("ha-rename-undo-")
+    first.write_text("{}")
+
+    class Frozen(cli.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.strptime(first.stem.removeprefix("ha-rename-undo-"), "%Y%m%d-%H%M%S")
+
+    monkeypatch.setattr(cli, "datetime", Frozen)
+    second = cli.default_undo_path()
+    assert second.name == f"{first.stem}-2.json"
+    second.write_text("{}")
+    assert cli.default_undo_path().name == f"{first.stem}-3.json"
+
+
+class TestUndo:
+    def apply(self, fake_ha, memory_keyring, in_tmp_dir):
+        stored(memory_keyring, fake_ha)
+        assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 0
+        [path] = undo_files(in_tmp_dir)
+        return path
+
+    def test_undo_restores_everything(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        capsys.readouterr()
+        assert cli.main(["--undo", str(path)]) == 0  # URL comes from the undo file
+        assert fake_ha.entities == SAMPLE_ENTITIES
+        out = capsys.readouterr().out
+        assert out.startswith(f"Undoing 3 change(s) from {path}\n")
+        assert "  name: 'Temperature' -> (integration's name)" in out
+        assert "  name: 'Heater' -> 'Backyard Station Heater'" in out
+
+    def test_undo_dry_run(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        renamed = [dict(e) for e in fake_ha.entities]
+        updates = len(fake_ha.updates)
+        assert cli.main(["--undo", str(path), "--dry-run"]) == 0
+        assert fake_ha.entities == renamed
+        assert len(fake_ha.updates) == updates
+        assert undo_files(in_tmp_dir) == [path]
+        assert "Dry run only; nothing changed." in capsys.readouterr().out
+
+    def test_undo_writes_its_own_undo_file_for_redo(self, fake_ha, memory_keyring, in_tmp_dir):
+        path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        renamed = [dict(e) for e in fake_ha.entities]
+        redo = in_tmp_dir / "redo.json"
+        assert cli.main(["--undo", str(path), "--undo-file", str(redo)]) == 0
+        assert fake_ha.entities == SAMPLE_ENTITIES
+        assert cli.main(["--undo", str(redo)]) == 0
+        assert fake_ha.entities == renamed
+
+    def test_undo_skips_missing_entities(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        fake_ha.entities = [
+            e for e in fake_ha.entities if e["entity_id"] != "switch.skyvane_station_heater"
+        ]
+        assert cli.main(["--undo", str(path)]) == 1
+        out = capsys.readouterr().out
+        assert "switch.skyvane_station_heater\n  SKIPPED: not found" in out
+        assert "Done with 1 error(s)." in out
+        assert fake_ha.find("sensor.skyvane_skyvane_station_backyard_station_temperature")
+
+    def test_undo_leaves_names_changed_since(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        fake_ha.find("sensor.skyvane_station_temperature")["name"] = "Outdoor temperature"
+        assert cli.main(["--undo", str(path)]) == 0
+        restored = fake_ha.find("sensor.skyvane_skyvane_station_backyard_station_temperature")
+        assert restored["name"] == "Outdoor temperature"
+        assert "changed since to 'Outdoor temperature'; left as is" in capsys.readouterr().out
+
+    def test_ha_url_overrides_undo_file(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        other = fake_ha.url.replace("127.0.0.1", "localhost")
+        store(memory_keyring, other)
+        assert cli.main(["--undo", str(path), "--ha-url", other, "--dry-run"]) == 0
+        assert f"was recorded against {fake_ha.url}; using {other}" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("option", ["--old-id-prefix", "--new-id-prefix"])
+    def test_undo_cannot_be_combined_with_rename_options(self, option, capsys):
+        with pytest.raises(SystemExit) as exc:
+            cli.main(["--undo", "x.json", option, "abc_"])
+        assert exc.value.code == 2
+        assert f"--undo can't be combined with {option}" in capsys.readouterr().err
+
+    def test_bad_undo_file_fails_before_prompting(self, in_tmp_dir, capsys):
+        (in_tmp_dir / "bad.json").write_text("nope")
+        # The autouse no_prompt fixture fails the test if a token is asked for.
+        assert cli.main(["--undo", "bad.json"]) == 1
+        assert "bad.json is not a valid undo file" in capsys.readouterr().err
+
+    def test_empty_undo_file(self, in_tmp_dir, capsys):
+        UndoLog.create(in_tmp_dir / "empty.json", "ws://ha.test/api/websocket")
+        assert cli.main(["--undo", "empty.json"]) == 0
+        assert "Nothing to undo" in capsys.readouterr().out
 
 
 def test_python_dash_m():

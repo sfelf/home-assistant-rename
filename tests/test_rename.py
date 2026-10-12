@@ -7,6 +7,7 @@ from ha_rename.rename import (
     strip_name_prefix,
     validate_id_prefix,
 )
+from ha_rename.undo import Change
 from tests.conftest import SAMPLE_ENTITIES, entity
 
 OLD = "skyvane_skyvane_station_backyard_station_"
@@ -95,6 +96,7 @@ class TestPlanRenames:
                 "switch.skyvane_station_heater",
                 "Backyard Station Heater",
                 "Heater",
+                registry_name="Backyard Station Heater",
             ),
             Rename(
                 "sensor.skyvane_skyvane_station_backyard_station_humidity",
@@ -133,6 +135,15 @@ class TestPlanRenames:
 
 
 class TestRename:
+    def test_to_change_uses_registry_names(self):
+        r = Rename("sensor.a_x", "sensor.b_x", "Old X", "X", registry_name=None)
+        assert r.to_change() == Change("sensor.a_x", "sensor.b_x", None, "X")
+
+    def test_to_change_keeps_registry_name_when_name_unchanged(self):
+        r = Rename("sensor.a_x", "sensor.b_x", "Custom", None, registry_name="Custom")
+        assert r.to_change() == Change("sensor.a_x", "sensor.b_x", "Custom", "Custom")
+        assert "name" not in r.update_payload()
+
     def test_payload_with_id_and_name(self):
         r = Rename("sensor.a_x", "sensor.b_x", "Old X", "X")
         assert r.has_changes

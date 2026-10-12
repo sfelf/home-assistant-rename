@@ -48,6 +48,13 @@ def no_prompt(monkeypatch):
     monkeypatch.setattr("getpass.getpass", fail)
 
 
+@pytest.fixture(autouse=True)
+def in_tmp_dir(tmp_path, monkeypatch):
+    """Run each test in its own directory, so undo files never land in the repo."""
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
 def entity(entity_id: str, name: str | None = None, original_name: str | None = None, **extra):
     return {
         "entity_id": entity_id,
@@ -110,17 +117,26 @@ class FakeHomeAssistant:
         if msg["type"] == "config/entity_registry/update":
             self.updates.append({k: v for k, v in msg.items() if k != "id"})
             if msg["entity_id"] in self.fail_updates:
-                return {
-                    **reply,
-                    "success": False,
-                    "error": {"code": "invalid_info", "message": "Entity is already registered"},
-                }
-            return {**reply, "success": True, "result": {}}
-        return {
-            **reply,
-            "success": False,
-            "error": {"code": "unknown_command", "message": "Unknown command."},
-        }
+                return self.error(reply, "invalid_info", "Entity is already registered")
+            entry = self.find(msg["entity_id"])
+            if entry is None:
+                return self.error(reply, "not_found", "Entity not found")
+            new_id = msg.get("new_entity_id")
+            if new_id and self.find(new_id):
+                return self.error(reply, "invalid_info", "Entity is already registered")
+            if new_id:
+                entry["entity_id"] = new_id
+            if "name" in msg:
+                entry["name"] = msg["name"]
+            return {**reply, "success": True, "result": {"entity_entry": entry}}
+        return self.error(reply, "unknown_command", "Unknown command.")
+
+    def find(self, entity_id: str) -> dict[str, Any] | None:
+        return next((e for e in self.entities if e["entity_id"] == entity_id), None)
+
+    @staticmethod
+    def error(reply: dict[str, Any], code: str, message: str) -> dict[str, Any]:
+        return {**reply, "success": False, "error": {"code": code, "message": message}}
 
 
 @pytest.fixture
