@@ -2,7 +2,7 @@
 
 Thanks for helping out! Bug reports, ideas and pull requests are all welcome.
 
-- **Found a bug or have an idea?** [Open an issue](https://github.com/sfelf/homeassistant-rename/issues).
+- **Found a bug or have an idea?** [Open an issue](https://github.com/sfelf/home-assistant-rename/issues).
   For bugs, include the command you ran (with `--dry-run` output if you can), your
   Home Assistant version and the error.
 - **Found a security problem?** Please don't open a public issue. See
@@ -14,8 +14,8 @@ You need [uv](https://docs.astral.sh/uv/). It installs the right Python and all
 dependencies for you.
 
 ```bash
-git clone https://github.com/sfelf/homeassistant-rename.git
-cd homeassistant-rename
+git clone https://github.com/sfelf/home-assistant-rename.git
+cd home-assistant-rename
 uv run ha-rename --help
 ```
 
@@ -50,7 +50,7 @@ Tests are in `tests/`, one file per module, with shared fixtures in `tests/conft
 
 1. Fork the repository and create a branch for your change.
 2. Make the change, with tests. Keep coverage at 100%: CI reports it to
-   [Codecov](https://codecov.io/gh/sfelf/homeassistant-rename).
+   [Codecov](https://codecov.io/gh/sfelf/home-assistant-rename).
 3. Update the README if you change user-facing behaviour or options.
 4. Open a pull request and fill in the template.
 
@@ -77,7 +77,7 @@ and Python dependencies up to date.
    source archive, and creates a **draft** GitHub Release titled with the tag, with the
    files attached and generated release notes.
 3. Review and edit the notes on the draft under
-   [Releases](https://github.com/sfelf/homeassistant-rename/releases) (keep the title
+   [Releases](https://github.com/sfelf/home-assistant-rename/releases) (keep the title
    as the tag), then click **Publish release**. Nothing is public until you do.
 
 ## License

@@ -8,7 +8,7 @@ administrator rights. Security reports are taken seriously.
 **Please don't report security problems in a public issue, discussion or pull request.**
 
 Report them privately through GitHub instead:
-[**Report a vulnerability**](https://github.com/sfelf/homeassistant-rename/security/advisories/new)
+[**Report a vulnerability**](https://github.com/sfelf/home-assistant-rename/security/advisories/new)
 (also under the repository's **Security** tab).
 
 Please include:
@@ -39,5 +39,5 @@ or user account.
 ## Supported versions
 
 Fixes go into the latest release only. Please check that a problem still occurs on
-the [latest release](https://github.com/sfelf/homeassistant-rename/releases/latest)
+the [latest release](https://github.com/sfelf/home-assistant-rename/releases/latest)
 before reporting it.
