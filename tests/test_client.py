@@ -22,15 +22,17 @@ def test_call_uses_increasing_ids_and_skips_unrelated_messages(fake_ha):
     async def go():
         async with client.connect(fake_ha.url, GOOD_TOKEN) as ha:
             await ha.list_entities()
-            await ha.call(
-                {"type": "config/entity_registry/update", "entity_id": "a.b", "name": "B"}
-            )
-            await ha.call(
-                {"type": "config/entity_registry/update", "entity_id": "a.c", "name": "C"}
-            )
+            for name in ("Lights", "Kitchen lights"):
+                await ha.call(
+                    {
+                        "type": "config/entity_registry/update",
+                        "entity_id": "light.kitchen",
+                        "name": name,
+                    }
+                )
 
     run(go())
-    assert [u["entity_id"] for u in fake_ha.updates] == ["a.b", "a.c"]
+    assert [u["name"] for u in fake_ha.updates] == ["Lights", "Kitchen lights"]
 
 
 def test_bad_token(fake_ha):

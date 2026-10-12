@@ -42,7 +42,8 @@ Details:
   then 1.
 
 Changes are applied by default. **Always run with `--dry-run` first** to check what
-will change.
+will change. Every run that changes something also saves an
+[undo file](#undoing-changes), so you can put everything back with `--undo`.
 
 ## Requirements
 
@@ -56,18 +57,18 @@ Install a release (see [Releases](https://github.com/sfelf/home-assistant-rename
 for the latest version) with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv tool install git+https://github.com/sfelf/home-assistant-rename.git@v0.1.0
+uv tool install git+https://github.com/sfelf/home-assistant-rename.git@v0.2.0
 ```
 
 Or with [pipx](https://pipx.pypa.io/):
 
 ```bash
-pipx install git+https://github.com/sfelf/home-assistant-rename.git@v0.1.0
+pipx install git+https://github.com/sfelf/home-assistant-rename.git@v0.2.0
 ```
 
 Either command puts `ha-rename` on your `PATH`. To move to a newer release, run the
 same command with the new version and `--force`, for example
-`uv tool install --force git+https://github.com/sfelf/home-assistant-rename.git@v0.2.0`.
+`uv tool install --force git+https://github.com/sfelf/home-assistant-rename.git@v0.3.0`.
 
 To try the latest unreleased changes instead, leave off the `@v…` suffix. Each release
 also has a wheel attached, which you can install directly with
@@ -102,8 +103,11 @@ uvx keyring del ha-rename ws://homeassistant.local:8123/api/websocket
 
 ```
 ha-rename --old-id-prefix PREFIX --new-id-prefix PREFIX --entity-name-prefix TEXT
-          [--ha-url URL] [--dry-run] [--reset-token]
-          [--print-completion SHELL] [--version] [-h]
+          [--undo-file PATH] [--ha-url URL] [--dry-run] [--reset-token]
+
+ha-rename --undo FILE [--undo-file PATH] [--ha-url URL] [--dry-run] [--reset-token]
+
+ha-rename --print-completion SHELL | --version | --help
 ```
 
 ### Example
@@ -133,16 +137,75 @@ sensor.skyvane_skyvane_station_backyard_station_humidity
 Dry run only; nothing changed.
 ```
 
-When you're happy with the preview, run the same command without `--dry-run`.
+When you're happy with the preview, run the same command without `--dry-run`. The
+output ends with where the undo file was saved:
+
+```
+Undo file: ha-rename-undo-20261011-224433.jsonl
+To reverse these changes, run: ha-rename --undo ha-rename-undo-20261011-224433.jsonl
+
+Done.
+```
+
+### Undoing changes
+
+Every run that changes something saves an undo file listing each change sent to Home
+Assistant: the entity ID and name before and after. It's a [JSON Lines](https://jsonlines.org/)
+file, with one line added per change. By default it's
+`ha-rename-undo-<date>-<time>.jsonl` in the current directory; choose another location
+with `--undo-file`. The file doesn't contain your access token. Dry runs, and runs that
+change nothing, don't save one.
+
+To reverse a run, pass its undo file to `--undo` (add `--dry-run` to preview):
+
+```bash
+ha-rename --undo ha-rename-undo-20261011-224433.jsonl
+```
+
+```
+Undoing 3 change(s) from ha-rename-undo-20261011-224433.jsonl
+
+sensor.skyvane_station_humidity
+  -> sensor.skyvane_skyvane_station_backyard_station_humidity
+switch.skyvane_station_heater
+  -> switch.skyvane_skyvane_station_backyard_station_heater
+  name: 'Heater' -> 'Backyard Station Heater'
+sensor.skyvane_station_temperature
+  -> sensor.skyvane_skyvane_station_backyard_station_temperature
+  name: 'Temperature' -> (integration's name)
+
+Undo file: ha-rename-undo-20261011-224510.jsonl
+To reverse these changes, run: ha-rename --undo ha-rename-undo-20261011-224510.jsonl
+
+Done.
+```
+
+- Changes are reversed newest first. It connects to the Home Assistant URL recorded in
+  the undo file unless you pass `--ha-url`.
+- Names are restored exactly. A name that came from the integration, shown as
+  `(integration's name)`, goes back to following the integration rather than being
+  fixed to a copy of the old text.
+- Entities are matched by Home Assistant's internal registry ID, which doesn't change
+  when an entity is renamed. Undo still finds an entity whose ID you've changed since,
+  and never touches a different entity that has since taken over the same ID.
+- If you've changed an entity's ID or name yourself since, your change is kept and the
+  output says so. Entities that no longer exist are skipped and reported, and the exit
+  code is 1, with `--dry-run` too, so a script can check before undoing.
+- The undo run saves its own undo file, so you can redo the original changes.
+- Each change is written to the undo file before it's sent, so if a run stops partway
+  (for example because the connection drops), the undo file still covers every change
+  that may have been applied. Any that weren't are shown as "nothing to undo".
 
 ### Options
 
 | Option | Required | Description |
 | --- | --- | --- |
-| `--old-id-prefix PREFIX` | yes | Entity ID prefix to match and replace, e.g. `skyvane_skyvane_station_backyard_station_`. Matched against the part of the ID after `<domain>.`. Lowercase letters, digits and underscores only. |
-| `--new-id-prefix PREFIX` | yes | Replacement for the old prefix, e.g. `skyvane_station_`. Pass `""` to remove the old prefix. Lowercase letters, digits and underscores only. Must end with `_` exactly when `--old-id-prefix` does; otherwise the tool stops with an error, since the IDs would run together (`skyvane_stationtemperature`) or get a double underscore. |
-| `--entity-name-prefix TEXT` | yes | Text to remove from the start of matching entity names, e.g. `"Backyard Station"`. Quote it if it contains spaces. |
-| `--ha-url URL` | no | Home Assistant WebSocket API URL. Default: `ws://homeassistant.local:8123/api/websocket`. Use `wss://<host>/api/websocket` if Home Assistant is served over HTTPS (e.g. via Nabu Casa or a reverse proxy). |
+| `--old-id-prefix PREFIX` | yes, unless `--undo` | Entity ID prefix to match and replace, e.g. `skyvane_skyvane_station_backyard_station_`. Matched against the part of the ID after `<domain>.`. Lowercase letters, digits and underscores only. |
+| `--new-id-prefix PREFIX` | yes, unless `--undo` | Replacement for the old prefix, e.g. `skyvane_station_`. Pass `""` to remove the old prefix. Lowercase letters, digits and underscores only. Must end with `_` exactly when `--old-id-prefix` does; otherwise the tool stops with an error, since the IDs would run together (`skyvane_stationtemperature`) or get a double underscore. |
+| `--entity-name-prefix TEXT` | yes, unless `--undo` | Text to remove from the start of matching entity names, e.g. `"Backyard Station"`. Quote it if it contains spaces. |
+| `--undo FILE` | no | Reverse the changes recorded in an undo file instead of renaming. Can't be combined with the three prefix options. See [Undoing changes](#undoing-changes). |
+| `--undo-file PATH` | no | Where to save the undo file. Default: `ha-rename-undo-<date>-<time>.jsonl` in the current directory. An existing file is never overwritten; the run stops before changing anything. |
+| `--ha-url URL` | no | Home Assistant WebSocket API URL. Default: `ws://homeassistant.local:8123/api/websocket`, or with `--undo` the URL recorded in the undo file. Use `wss://<host>/api/websocket` if Home Assistant is served over HTTPS (e.g. via Nabu Casa or a reverse proxy). |
 | `--dry-run` | no | Show what would change without changing anything. |
 | `--reset-token` | no | Ignore the saved access token and ask for a new one. The new token replaces the saved one once Home Assistant accepts it. |
 | `--print-completion SHELL` | no | Print a tab-completion script for `bash`, `zsh`, `fish`, `tcsh` or `powershell`, then exit. |
@@ -154,7 +217,7 @@ When you're happy with the preview, run the same command without `--dry-run`.
 | Code | Meaning |
 | --- | --- |
 | 0 | Success (or dry run completed) |
-| 1 | An error occurred: connection, authentication, keyring, or one or more failed updates |
+| 1 | An error occurred: connection, authentication, keyring, undo file, one or more failed updates, or entities skipped by `--undo` (also with `--dry-run`) |
 | 2 | Invalid command-line arguments |
 | 130 | Cancelled with Ctrl-C |
 

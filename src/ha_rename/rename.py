@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from ha_rename.undo import Change
+
 # Home Assistant object IDs (the part after "<domain>.") are lowercase snake case.
 _OBJECT_ID_CHARS = re.compile(r"[a-z0-9_]*")
 
@@ -44,29 +46,37 @@ def check_prefix_separators(old_prefix: str, new_prefix: str) -> None:
 
 @dataclass(frozen=True)
 class Rename:
-    """A planned change to one entity registry entry."""
+    """A planned change to one entity registry entry.
+
+    ``current_name`` is the name as shown (the registry's custom name, else the
+    integration's); ``registry_name`` is the registry's custom ``name`` field itself, and
+    ``registry_id`` the registry entry's ``id``.
+    """
 
     entity_id: str
     new_entity_id: str
     current_name: str
     new_name: str | None
     uses_device_name: bool = False
+    registry_name: str | None = None
+    registry_id: str | None = None
+
+    def to_change(self) -> Change:
+        return Change(
+            entity_id=self.entity_id,
+            new_entity_id=self.new_entity_id,
+            name=self.registry_name,
+            new_name=self.new_name if self.new_name is not None else self.registry_name,
+            registry_id=self.registry_id,
+        )
 
     @property
     def has_changes(self) -> bool:
-        return self.new_entity_id != self.entity_id or self.new_name is not None
+        return self.to_change().has_changes
 
     def update_payload(self) -> dict[str, Any]:
         """The ``config/entity_registry/update`` command for this rename (without ``id``)."""
-        payload: dict[str, Any] = {
-            "type": "config/entity_registry/update",
-            "entity_id": self.entity_id,
-        }
-        if self.new_entity_id != self.entity_id:
-            payload["new_entity_id"] = self.new_entity_id
-        if self.new_name is not None:
-            payload["name"] = self.new_name
-        return payload
+        return self.to_change().payload()
 
     def describe(self) -> list[str]:
         """Human-readable lines describing this rename."""
@@ -116,6 +126,8 @@ def plan_renames(
                 current_name=current_name,
                 new_name=strip_name_prefix(current_name, name_prefix),
                 uses_device_name=bool(entry.get("has_entity_name")),
+                registry_name=entry.get("name"),
+                registry_id=entry.get("id"),
             )
         )
     return renames

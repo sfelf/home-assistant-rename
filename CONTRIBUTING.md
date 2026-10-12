@@ -43,6 +43,7 @@ All code lives in `src/ha_rename/`:
 - `rename.py`: works out which entities to rename and how (no I/O)
 - `client.py`: minimal Home Assistant WebSocket API client
 - `credentials.py`: saves the access token in the system keyring and prompts for it
+- `undo.py`: records applied changes in undo files and works out how to reverse them
 
 Tests are in `tests/`, one file per module, with shared fixtures in `tests/conftest.py`.
 
@@ -68,8 +69,8 @@ and Python dependencies up to date.
 
    ```bash
    git switch main && git pull
-   git tag -a v0.2.0 -m "v0.2.0"
-   git push origin v0.2.0
+   git tag -a v0.3.0 -m "v0.3.0"
+   git push origin v0.3.0
    ```
 
    The [Release workflow](.github/workflows/release.yml) checks that the tag matches

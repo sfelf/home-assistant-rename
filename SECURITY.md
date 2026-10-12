@@ -30,6 +30,8 @@ For example:
 - the token for one Home Assistant URL being used for a different one
 - changes being made to Home Assistant during a `--dry-run`, or to entities that
   don't match `--old-id-prefix`
+- `--undo` changing anything not listed in the undo file, or an undo file containing
+  the access token
 
 Out of scope: problems in Home Assistant itself (report those to the
 [Home Assistant project](https://www.home-assistant.io/security/)), in your

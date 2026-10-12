@@ -12,3 +12,6 @@ wheels/
 .coverage
 htmlcov/
 coverage.xml
+
+# Undo files written by ha-rename
+ha-rename-undo-*.jsonl
