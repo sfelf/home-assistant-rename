@@ -7,9 +7,12 @@ from ha_rename import __version__, cli
 from tests.conftest import GOOD_TOKEN
 
 PREFIX_ARGS = [
-    "--old-id-prefix", "skyvane_skyvane_station_backyard_station_",
-    "--new-id-prefix", "skyvane_station_",
-    "--entity-name-prefix", "Backyard Station",
+    "--old-id-prefix",
+    "skyvane_skyvane_station_backyard_station_",
+    "--new-id-prefix",
+    "skyvane_station_",
+    "--entity-name-prefix",
+    "Backyard Station",
 ]
 
 
@@ -47,30 +50,38 @@ class TestParser:
         assert args.entity_name_prefix == "Backyard Station"
 
     def test_options(self):
-        args = self.parse("--ha-url", "wss://ha.example/api/websocket", "--dry-run", "--reset-token")
+        args = self.parse(
+            "--ha-url", "wss://ha.example/api/websocket", "--dry-run", "--reset-token"
+        )
         assert args.ha_url == "wss://ha.example/api/websocket"
         assert args.dry_run is True
         assert args.reset_token is True
 
     def test_empty_new_prefix_allowed(self):
         args = cli.build_parser().parse_args(
-            ["--old-id-prefix", "a_", "--new-id-prefix", "", "--entity-name-prefix", "A"])
+            ["--old-id-prefix", "a_", "--new-id-prefix", "", "--entity-name-prefix", "A"]
+        )
         assert args.new_id_prefix == ""
 
-    @pytest.mark.parametrize("missing", ["--old-id-prefix", "--new-id-prefix", "--entity-name-prefix"])
+    @pytest.mark.parametrize(
+        "missing", ["--old-id-prefix", "--new-id-prefix", "--entity-name-prefix"]
+    )
     def test_prefixes_are_required(self, missing, capsys):
         i = PREFIX_ARGS.index(missing)
-        argv = PREFIX_ARGS[:i] + PREFIX_ARGS[i + 2:]
+        argv = PREFIX_ARGS[:i] + PREFIX_ARGS[i + 2 :]
         with pytest.raises(SystemExit) as exc:
             cli.build_parser().parse_args(argv)
         assert exc.value.code == 2
         assert missing in capsys.readouterr().err
 
-    @pytest.mark.parametrize("option, value", [
-        ("--old-id-prefix", ""),
-        ("--old-id-prefix", "Bad-Prefix"),
-        ("--new-id-prefix", "bad prefix"),
-    ])
+    @pytest.mark.parametrize(
+        "option, value",
+        [
+            ("--old-id-prefix", ""),
+            ("--old-id-prefix", "Bad-Prefix"),
+            ("--new-id-prefix", "bad prefix"),
+        ],
+    )
     def test_invalid_prefixes(self, option, value, capsys):
         argv = [*PREFIX_ARGS, option, value]
         with pytest.raises(SystemExit) as exc:
@@ -92,9 +103,19 @@ class TestParser:
             cli.build_parser().parse_args(["--help"])
         assert exc.value.code == 0
         out = capsys.readouterr().out
-        for text in ["--old-id-prefix", "--new-id-prefix", "--entity-name-prefix", "--ha-url",
-                     "--dry-run", "--reset-token", "--print-completion", "--version",
-                     "Long-lived access tokens", "keyring", "examples:"]:
+        for text in [
+            "--old-id-prefix",
+            "--new-id-prefix",
+            "--entity-name-prefix",
+            "--ha-url",
+            "--dry-run",
+            "--reset-token",
+            "--print-completion",
+            "--version",
+            "Long-lived access tokens",
+            "keyring",
+            "examples:",
+        ]:
             assert text in out
 
     def test_version(self, capsys):
@@ -118,15 +139,23 @@ class TestMain:
         assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 0
 
         assert fake_ha.updates == [
-            {"type": "config/entity_registry/update",
-             "entity_id": "sensor.skyvane_skyvane_station_backyard_station_temperature",
-             "new_entity_id": "sensor.skyvane_station_temperature", "name": "Temperature"},
-            {"type": "config/entity_registry/update",
-             "entity_id": "switch.skyvane_skyvane_station_backyard_station_heater",
-             "new_entity_id": "switch.skyvane_station_heater", "name": "Heater"},
-            {"type": "config/entity_registry/update",
-             "entity_id": "sensor.skyvane_skyvane_station_backyard_station_humidity",
-             "new_entity_id": "sensor.skyvane_station_humidity"},
+            {
+                "type": "config/entity_registry/update",
+                "entity_id": "sensor.skyvane_skyvane_station_backyard_station_temperature",
+                "new_entity_id": "sensor.skyvane_station_temperature",
+                "name": "Temperature",
+            },
+            {
+                "type": "config/entity_registry/update",
+                "entity_id": "switch.skyvane_skyvane_station_backyard_station_heater",
+                "new_entity_id": "switch.skyvane_station_heater",
+                "name": "Heater",
+            },
+            {
+                "type": "config/entity_registry/update",
+                "entity_id": "sensor.skyvane_skyvane_station_backyard_station_humidity",
+                "new_entity_id": "sensor.skyvane_station_humidity",
+            },
         ]
         out = capsys.readouterr().out
         assert out.startswith("Found 3 matching entities\n")
@@ -144,8 +173,16 @@ class TestMain:
 
     def test_skips_entities_with_nothing_to_change(self, fake_ha, memory_keyring):
         store(memory_keyring, fake_ha.url)
-        argv = ["--old-id-prefix", "kitchen", "--new-id-prefix", "kitchen",
-                "--entity-name-prefix", "Nope", "--ha-url", fake_ha.url]
+        argv = [
+            "--old-id-prefix",
+            "kitchen",
+            "--new-id-prefix",
+            "kitchen",
+            "--entity-name-prefix",
+            "Nope",
+            "--ha-url",
+            fake_ha.url,
+        ]
         assert cli.main(argv) == 0
         assert fake_ha.updates == []
 
@@ -261,6 +298,7 @@ class TestMain:
 
 
 def test_python_dash_m():
-    result = subprocess.run([sys.executable, "-m", "ha_rename", "--version"],
-                            capture_output=True, text=True, check=True)
+    result = subprocess.run(
+        [sys.executable, "-m", "ha_rename", "--version"], capture_output=True, text=True, check=True
+    )
     assert result.stdout.strip() == f"ha-rename {__version__}"

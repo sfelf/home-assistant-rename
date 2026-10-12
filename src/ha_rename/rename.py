@@ -87,7 +87,7 @@ def strip_name_prefix(name: str, prefix: str) -> str | None:
     """
     if not prefix or not name.startswith(prefix):
         return None
-    stripped = name[len(prefix):].lstrip()
+    stripped = name[len(prefix) :].lstrip()
     return stripped or None
 
 
@@ -97,14 +97,17 @@ def plan_renames(
     new_id_prefix: str,
     name_prefix: str,
 ) -> list[Rename]:
-    """Work out the renames for every registry entry whose object ID starts with ``old_id_prefix``."""
+    """Work out the renames for every registry entry whose object ID starts with ``old_id_prefix``.
+
+    Entries are matched on the part of the entity ID after ``<domain>.``.
+    """
     renames = []
     for entry in entries:
         domain, object_id = entry["entity_id"].split(".", 1)
         if not object_id.startswith(old_id_prefix):
             continue
 
-        new_entity_id = f"{domain}.{new_id_prefix}{object_id[len(old_id_prefix):]}"
+        new_entity_id = f"{domain}.{new_id_prefix}{object_id[len(old_id_prefix) :]}"
         current_name = entry.get("name") or entry.get("original_name") or ""
         renames.append(
             Rename(

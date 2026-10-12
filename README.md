@@ -190,11 +190,19 @@ git clone git@github.com:sfelf/homeassistant-rename.git
 cd homeassistant-rename
 uv run ha-rename --help
 uv run pytest
+uv run ruff check
+uv run ruff format
 ```
 
 `uv run pytest` runs the test suite with a coverage report. The tests use a fake Home
 Assistant WebSocket server and an in-memory keyring, so they never touch a real
-instance or your real keyring.
+instance or your real keyring. [Ruff](https://docs.astral.sh/ruff/) checks the code
+(`ruff check`, add `--fix` to apply fixes) and formats it (`ruff format`).
+
+`main` is protected: changes go in through pull requests, and a pull request can only
+be merged once the **All checks passed** status (lint plus the full test matrix) is
+green. [Dependabot](.github/dependabot.yml) opens weekly pull requests to keep GitHub
+Actions and Python dependencies up to date.
 
 Code layout (`src/ha_rename/`):
 

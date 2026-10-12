@@ -32,12 +32,15 @@ class TestValidateIdPrefix:
 
 
 class TestCheckPrefixSeparators:
-    @pytest.mark.parametrize("old, new", [
-        ("sky_", "vane_"),
-        ("kitchen", "lounge"),
-        ("sky_", ""),
-        ("kitchen", ""),
-    ])
+    @pytest.mark.parametrize(
+        "old, new",
+        [
+            ("sky_", "vane_"),
+            ("kitchen", "lounge"),
+            ("sky_", ""),
+            ("kitchen", ""),
+        ],
+    )
     def test_allowed(self, old, new):
         check_prefix_separators(old, new)
 
@@ -55,10 +58,14 @@ class TestCheckPrefixSeparators:
 
 class TestStripNamePrefix:
     def test_strips_prefix_and_following_space(self):
-        assert strip_name_prefix("Backyard Station Temperature", "Backyard Station") == "Temperature"
+        assert (
+            strip_name_prefix("Backyard Station Temperature", "Backyard Station") == "Temperature"
+        )
 
     def test_prefix_with_trailing_space(self):
-        assert strip_name_prefix("Backyard Station Temperature", "Backyard Station ") == "Temperature"
+        assert (
+            strip_name_prefix("Backyard Station Temperature", "Backyard Station ") == "Temperature"
+        )
 
     def test_no_match(self):
         assert strip_name_prefix("Temperature", "Backyard Station") is None
@@ -77,16 +84,33 @@ class TestPlanRenames:
     def test_sample(self):
         renames = plan_renames(SAMPLE_ENTITIES, OLD, NEW, "Backyard Station")
         assert renames == [
-            Rename("sensor.skyvane_skyvane_station_backyard_station_temperature", "sensor.skyvane_station_temperature",
-                   "Backyard Station Temperature", "Temperature"),
-            Rename("switch.skyvane_skyvane_station_backyard_station_heater", "switch.skyvane_station_heater",
-                   "Backyard Station Heater", "Heater"),
-            Rename("sensor.skyvane_skyvane_station_backyard_station_humidity", "sensor.skyvane_station_humidity",
-                   "Humidity", None, uses_device_name=True),
+            Rename(
+                "sensor.skyvane_skyvane_station_backyard_station_temperature",
+                "sensor.skyvane_station_temperature",
+                "Backyard Station Temperature",
+                "Temperature",
+            ),
+            Rename(
+                "switch.skyvane_skyvane_station_backyard_station_heater",
+                "switch.skyvane_station_heater",
+                "Backyard Station Heater",
+                "Heater",
+            ),
+            Rename(
+                "sensor.skyvane_skyvane_station_backyard_station_humidity",
+                "sensor.skyvane_station_humidity",
+                "Humidity",
+                None,
+                uses_device_name=True,
+            ),
         ]
 
     def test_user_name_takes_precedence_over_original_name(self):
-        entries = [entity(f"sensor.{OLD}x", name="Backyard Station Custom", original_name="Backyard Station X")]
+        entries = [
+            entity(
+                f"sensor.{OLD}x", name="Backyard Station Custom", original_name="Backyard Station X"
+            )
+        ]
         [rename] = plan_renames(entries, OLD, NEW, "Backyard Station")
         assert rename.current_name == "Backyard Station Custom"
         assert rename.new_name == "Custom"
@@ -146,4 +170,7 @@ class TestRename:
         assert lines[-1] == "  name: uses device name as prefix (rename the device instead)"
 
     def test_describe_id_only(self):
-        assert Rename("sensor.a_x", "sensor.b_x", "X", None).describe() == ["sensor.a_x", "  -> sensor.b_x"]
+        assert Rename("sensor.a_x", "sensor.b_x", "X", None).describe() == [
+            "sensor.a_x",
+            "  -> sensor.b_x",
+        ]

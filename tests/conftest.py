@@ -28,7 +28,6 @@ class MemoryKeyring(KeyringBackend):
         self.passwords[(service, username)] = password
 
 
-
 @pytest.fixture(autouse=True)
 def memory_keyring():
     """Never touch the real system keyring during tests."""
@@ -60,9 +59,18 @@ def entity(entity_id: str, name: str | None = None, original_name: str | None = 
 
 
 SAMPLE_ENTITIES = [
-    entity("sensor.skyvane_skyvane_station_backyard_station_temperature", original_name="Backyard Station Temperature"),
-    entity("switch.skyvane_skyvane_station_backyard_station_heater", name="Backyard Station Heater"),
-    entity("sensor.skyvane_skyvane_station_backyard_station_humidity", original_name="Humidity", has_entity_name=True),
+    entity(
+        "sensor.skyvane_skyvane_station_backyard_station_temperature",
+        original_name="Backyard Station Temperature",
+    ),
+    entity(
+        "switch.skyvane_skyvane_station_backyard_station_heater", name="Backyard Station Heater"
+    ),
+    entity(
+        "sensor.skyvane_skyvane_station_backyard_station_humidity",
+        original_name="Humidity",
+        has_entity_name=True,
+    ),
     entity("light.kitchen", original_name="Kitchen"),
 ]
 
@@ -82,7 +90,9 @@ class FakeHomeAssistant:
         await ws.send(json.dumps(self.first_message))
         auth = json.loads(await ws.recv())
         if auth.get("access_token") != self.token:
-            await ws.send(json.dumps({"type": "auth_invalid", "message": "Invalid access token or password"}))
+            await ws.send(
+                json.dumps({"type": "auth_invalid", "message": "Invalid access token or password"})
+            )
             return
         await ws.send(json.dumps({"type": "auth_ok", "ha_version": "2026.10.0"}))
 
@@ -100,9 +110,17 @@ class FakeHomeAssistant:
         if msg["type"] == "config/entity_registry/update":
             self.updates.append({k: v for k, v in msg.items() if k != "id"})
             if msg["entity_id"] in self.fail_updates:
-                return {**reply, "success": False, "error": {"code": "invalid_info", "message": "Entity is already registered"}}
+                return {
+                    **reply,
+                    "success": False,
+                    "error": {"code": "invalid_info", "message": "Entity is already registered"},
+                }
             return {**reply, "success": True, "result": {}}
-        return {**reply, "success": False, "error": {"code": "unknown_command", "message": "Unknown command."}}
+        return {
+            **reply,
+            "success": False,
+            "error": {"code": "unknown_command", "message": "Unknown command."},
+        }
 
 
 @pytest.fixture
@@ -122,7 +140,9 @@ def fake_ha():
             started.set()
             await stop.wait()
 
-    thread = threading.Thread(target=loop.run_until_complete, args=(serve_until_stopped(),), daemon=True)
+    thread = threading.Thread(
+        target=loop.run_until_complete, args=(serve_until_stopped(),), daemon=True
+    )
     thread.start()
     assert started.wait(5), "fake Home Assistant server did not start"
     yield ha

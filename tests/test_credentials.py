@@ -21,10 +21,13 @@ def test_tokens_are_per_url():
     assert credentials.load_token("ws://other.test/api/websocket") is None
 
 
-@pytest.mark.parametrize("func, args", [
-    (credentials.load_token, (URL,)),
-    (credentials.save_token, (URL, "abc")),
-])
+@pytest.mark.parametrize(
+    "func, args",
+    [
+        (credentials.load_token, (URL,)),
+        (credentials.save_token, (URL, "abc")),
+    ],
+)
 def test_keyring_errors_become_credential_errors(monkeypatch, func, args):
     def boom(*a):
         raise KeyringError("locked")

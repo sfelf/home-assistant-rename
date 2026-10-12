@@ -22,8 +22,12 @@ def test_call_uses_increasing_ids_and_skips_unrelated_messages(fake_ha):
     async def go():
         async with client.connect(fake_ha.url, GOOD_TOKEN) as ha:
             await ha.list_entities()
-            await ha.call({"type": "config/entity_registry/update", "entity_id": "a.b", "name": "B"})
-            await ha.call({"type": "config/entity_registry/update", "entity_id": "a.c", "name": "C"})
+            await ha.call(
+                {"type": "config/entity_registry/update", "entity_id": "a.b", "name": "B"}
+            )
+            await ha.call(
+                {"type": "config/entity_registry/update", "entity_id": "a.c", "name": "C"}
+            )
 
     run(go())
     assert [u["entity_id"] for u in fake_ha.updates] == ["a.b", "a.c"]
@@ -59,10 +63,13 @@ def test_command_error(fake_ha):
     assert exc.value.error == {"code": "unknown_command", "message": "Unknown command."}
 
 
-@pytest.mark.parametrize("error, message", [
-    ({"message": "bad"}, "error: bad"),
-    ("plain text", "plain text"),
-    (None, "None"),
-])
+@pytest.mark.parametrize(
+    "error, message",
+    [
+        ({"message": "bad"}, "error: bad"),
+        ("plain text", "plain text"),
+        (None, "None"),
+    ],
+)
 def test_command_error_messages(error, message):
     assert str(client.CommandError(error)) == message

@@ -11,6 +11,26 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Check lint
+        run: uv run ruff check --output-format github
+
+      - name: Check formatting
+        run: uv run ruff format --check
+
   test:
     name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -48,3 +68,14 @@ jobs:
           files: coverage.xml
           flags: ${{ matrix.os }}-py${{ matrix.python-version }}
 
+  # Single check for branch protection to require, so it doesn't need updating
+  # whenever the lint or test jobs change.
+  all-checks:
+    name: All checks passed
+    if: always()
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job failed or was cancelled
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

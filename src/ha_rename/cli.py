@@ -73,7 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         metavar="PREFIX",
         type=_id_prefix(allow_empty=False),
-        help="entity ID prefix to match and replace, e.g. skyvane_skyvane_station_backyard_station_",
+        help="entity ID prefix to match and replace, "
+        "e.g. skyvane_skyvane_station_backyard_station_",
     )
     required.add_argument(
         "--new-id-prefix",
