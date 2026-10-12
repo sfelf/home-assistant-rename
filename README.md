@@ -5,10 +5,10 @@
 
 ---
 
-[![Release](https://img.shields.io/github/v/release/sfelf/homeassistant-rename?sort=semver)](https://github.com/sfelf/homeassistant-rename/releases/latest)
-[![Tests](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml/badge.svg)](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml)
-[![codecov](https://codecov.io/gh/sfelf/homeassistant-rename/graph/badge.svg)](https://codecov.io/gh/sfelf/homeassistant-rename)
-[![Python 3.11 | 3.12 | 3.13 | 3.14](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://github.com/sfelf/homeassistant-rename/blob/main/pyproject.toml)
+[![Release](https://img.shields.io/github/v/release/sfelf/home-assistant-rename?sort=semver)](https://github.com/sfelf/home-assistant-rename/releases/latest)
+[![Tests](https://github.com/sfelf/home-assistant-rename/actions/workflows/tests.yml/badge.svg)](https://github.com/sfelf/home-assistant-rename/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/sfelf/home-assistant-rename/graph/badge.svg)](https://codecov.io/gh/sfelf/home-assistant-rename)
+[![Python 3.11 | 3.12 | 3.13 | 3.14](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://github.com/sfelf/home-assistant-rename/blob/main/pyproject.toml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
 Bulk-rename [Home Assistant](https://www.home-assistant.io/) entities from the command line.
@@ -52,22 +52,22 @@ will change.
 
 ## Installation
 
-Install a release (see [Releases](https://github.com/sfelf/homeassistant-rename/releases)
+Install a release (see [Releases](https://github.com/sfelf/home-assistant-rename/releases)
 for the latest version) with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv tool install git+https://github.com/sfelf/homeassistant-rename.git@v0.1.0
+uv tool install git+https://github.com/sfelf/home-assistant-rename.git@v0.1.0
 ```
 
 Or with [pipx](https://pipx.pypa.io/):
 
 ```bash
-pipx install git+https://github.com/sfelf/homeassistant-rename.git@v0.1.0
+pipx install git+https://github.com/sfelf/home-assistant-rename.git@v0.1.0
 ```
 
 Either command puts `ha-rename` on your `PATH`. To move to a newer release, run the
 same command with the new version and `--force`, for example
-`uv tool install --force git+https://github.com/sfelf/homeassistant-rename.git@v0.2.0`.
+`uv tool install --force git+https://github.com/sfelf/home-assistant-rename.git@v0.2.0`.
 
 To try the latest unreleased changes instead, leave off the `@v…` suffix. Each release
 also has a wheel attached, which you can install directly with
@@ -183,56 +183,9 @@ ha-rename --print-completion fish > ~/.config/fish/completions/ha-rename.fish
 
 Then open a new shell.
 
-## Development
-
-```bash
-git clone git@github.com:sfelf/homeassistant-rename.git
-cd homeassistant-rename
-uv run ha-rename --help
-uv run pytest
-uv run ruff check
-uv run ruff format
-```
-
-`uv run pytest` runs the test suite with a coverage report. The tests use a fake Home
-Assistant WebSocket server and an in-memory keyring, so they never touch a real
-instance or your real keyring. [Ruff](https://docs.astral.sh/ruff/) checks the code
-(`ruff check`, add `--fix` to apply fixes) and formats it (`ruff format`).
-
-`main` is protected: changes go in through pull requests, and a pull request can only
-be merged once the **All checks passed** status (lint plus the full test matrix) is
-green. [Dependabot](.github/dependabot.yml) opens weekly pull requests to keep GitHub
-Actions and Python dependencies up to date.
-
-Code layout (`src/ha_rename/`):
-
-- `cli.py`: command-line parsing and the main program flow
-- `rename.py`: works out which entities to rename and how (no I/O)
-- `client.py`: minimal Home Assistant WebSocket API client
-- `credentials.py`: saves the access token in the system keyring and prompts for it
-
-### Releasing
-
-1. Bump the version in `pyproject.toml`, e.g. `uv version --bump minor`, and commit it.
-2. Tag the commit and push the tag:
-
-   ```bash
-   git tag v0.2.0
-   git push origin v0.2.0
-   ```
-
-The [Release workflow](.github/workflows/release.yml) checks that the tag matches the
-version in `pyproject.toml`, runs the full test suite, builds the wheel and source
-archive, and creates a **draft** GitHub Release with them attached and generated
-release notes.
-
-3. Review and edit the notes on the draft under
-   [Releases](https://github.com/sfelf/homeassistant-rename/releases), then click
-   **Publish release**. Nothing is public until you do.
-
 ## License
 
-Copyright (C) 2026 Thomas Nelson
+Copyright (C) 2026 Home Assistant Rename Contributors
 
 This program is free software: you can redistribute it and/or modify it under the
 terms of the GNU Affero General Public License as published by the Free Software
