@@ -127,6 +127,16 @@ class TestUndoLog:
         assert "Stopped before changing sensor.old_temp" in str(exc.value)
         assert log.changes == []
 
+    def test_removed_file_is_not_recreated(self, tmp_path):
+        path = tmp_path / "undo.jsonl"
+        log = UndoLog.create(path, URL)
+        log.record(RENAME)
+        path.unlink()
+        other = Change("sensor.a", "sensor.b", None, None)
+        with pytest.raises(undo.UndoFileError, match="Stopped before changing sensor.a"):
+            log.record(other)
+        assert not path.exists()
+
     def test_forget_failure_explains_the_extra_entry(self, tmp_path):
         log = UndoLog.create(tmp_path / "undo.jsonl", URL)
         log.record(RENAME)

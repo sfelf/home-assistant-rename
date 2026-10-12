@@ -1,6 +1,7 @@
 """Record applied changes in an undo file, and work out how to reverse them."""
 
 import json
+import os
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -127,7 +128,10 @@ class UndoLog:
 
     def _append(self, item: dict[str, Any], consequence: str) -> None:
         try:
-            with self.path.open("a", encoding="utf-8") as f:
+            # No O_CREAT: if the file was removed mid-run, fail instead of starting a new
+            # file without the header and earlier changes.
+            fd = os.open(self.path, os.O_WRONLY | os.O_APPEND)
+            with open(fd, "a", encoding="utf-8") as f:
                 f.write(json.dumps(item) + "\n")
         except OSError as e:
             raise UndoFileError(

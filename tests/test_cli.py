@@ -1,7 +1,7 @@
 import json
+import os
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -398,14 +398,14 @@ class TestUndoFile:
 
     def test_undo_file_update_failure_stops_run(self, fake_ha, memory_keyring, monkeypatch, capsys):
         stored(memory_keyring, fake_ha)
-        real_open = Path.open
+        real_open = os.open
 
-        def open_(self, mode="r", *args, **kwargs):
-            if mode == "a":
+        def open_(path, flags, *args, **kwargs):
+            if flags & os.O_APPEND:
                 raise OSError(28, "No space left on device")
-            return real_open(self, mode, *args, **kwargs)
+            return real_open(path, flags, *args, **kwargs)
 
-        monkeypatch.setattr(Path, "open", open_)
+        monkeypatch.setattr(os, "open", open_)
         assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 1
         assert fake_ha.updates == []  # each change is recorded before it's sent
         err = capsys.readouterr().err
