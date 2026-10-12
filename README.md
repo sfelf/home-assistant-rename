@@ -5,10 +5,10 @@
 
 ---
 
-[![Release](https://img.shields.io/github/v/release/sfelf/homeassistant-rename?sort=semver)](https://github.com/sfelf/homeassistant-rename/releases/latest)
-[![Tests](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml/badge.svg)](https://github.com/sfelf/homeassistant-rename/actions/workflows/tests.yml)
-[![codecov](https://codecov.io/gh/sfelf/homeassistant-rename/graph/badge.svg)](https://codecov.io/gh/sfelf/homeassistant-rename)
-[![Python 3.11 | 3.12 | 3.13 | 3.14](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://github.com/sfelf/homeassistant-rename/blob/main/pyproject.toml)
+[![Release](https://img.shields.io/github/v/release/sfelf/home-assistant-rename?sort=semver)](https://github.com/sfelf/home-assistant-rename/releases/latest)
+[![Tests](https://github.com/sfelf/home-assistant-rename/actions/workflows/tests.yml/badge.svg)](https://github.com/sfelf/home-assistant-rename/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/sfelf/home-assistant-rename/graph/badge.svg)](https://codecov.io/gh/sfelf/home-assistant-rename)
+[![Python 3.11 | 3.12 | 3.13 | 3.14](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue)](https://github.com/sfelf/home-assistant-rename/blob/main/pyproject.toml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
 Bulk-rename [Home Assistant](https://www.home-assistant.io/) entities from the command line.
@@ -52,22 +52,22 @@ will change.
 
 ## Installation
 
-Install a release (see [Releases](https://github.com/sfelf/homeassistant-rename/releases)
+Install a release (see [Releases](https://github.com/sfelf/home-assistant-rename/releases)
 for the latest version) with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv tool install git+https://github.com/sfelf/homeassistant-rename.git@v0.1.0
+uv tool install git+https://github.com/sfelf/home-assistant-rename.git@v0.1.0
 ```
 
 Or with [pipx](https://pipx.pypa.io/):
 
 ```bash
-pipx install git+https://github.com/sfelf/homeassistant-rename.git@v0.1.0
+pipx install git+https://github.com/sfelf/home-assistant-rename.git@v0.1.0
 ```
 
 Either command puts `ha-rename` on your `PATH`. To move to a newer release, run the
 same command with the new version and `--force`, for example
-`uv tool install --force git+https://github.com/sfelf/homeassistant-rename.git@v0.2.0`.
+`uv tool install --force git+https://github.com/sfelf/home-assistant-rename.git@v0.2.0`.
 
 To try the latest unreleased changes instead, leave off the `@v…` suffix. Each release
 also has a wheel attached, which you can install directly with
@@ -186,8 +186,8 @@ Then open a new shell.
 ## Development
 
 ```bash
-git clone git@github.com:sfelf/homeassistant-rename.git
-cd homeassistant-rename
+git clone git@github.com:sfelf/home-assistant-rename.git
+cd home-assistant-rename
 uv run ha-rename --help
 uv run pytest
 uv run ruff check
@@ -227,7 +227,7 @@ archive, and creates a **draft** GitHub Release with them attached and generated
 release notes.
 
 3. Review and edit the notes on the draft under
-   [Releases](https://github.com/sfelf/homeassistant-rename/releases), then click
+   [Releases](https://github.com/sfelf/home-assistant-rename/releases), then click
    **Publish release**. Nothing is public until you do.
 
 ## License
