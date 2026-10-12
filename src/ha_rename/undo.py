@@ -178,12 +178,13 @@ def _parse_header(line: str) -> dict[str, Any]:
 def load(path: Path) -> UndoFile:
     """Read an undo file written by :class:`UndoLog`."""
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        text = path.read_text(encoding="utf-8")
     except OSError as e:
         raise UndoFileError(f"could not read undo file {path}: {e.strerror or e}") from e
     except ValueError as e:  # not UTF-8 text
         raise UndoFileError(f"{path} is not a valid undo file: {e}") from e
 
+    lines = text.splitlines()
     numbered = [(n, line) for n, line in enumerate(lines, start=1) if line.strip()]
     if not numbered:
         raise UndoFileError(f"{path} is not a valid undo file: it's empty")
@@ -198,9 +199,10 @@ def load(path: Path) -> UndoFile:
         try:
             item = json.loads(line)
         except ValueError as e:
-            if n == numbered[-1][0]:
-                # A line cut short when the run was killed while writing it. Changes are
-                # sent only after their line is written, so this one was never sent.
+            if n == len(lines) and not text.endswith("\n"):
+                # A last line with no newline was cut short when the run was killed while
+                # writing it. Changes are sent only after their whole line is written, so
+                # this one was never sent. A complete line that's malformed is an error.
                 break
             raise UndoFileError(f"{path} is not a valid undo file: line {n}: {e}") from e
         try:

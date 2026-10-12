@@ -190,7 +190,7 @@ Done.
   and never touches a different entity that has since taken over the same ID.
 - If you've changed an entity's ID or name yourself since, your change is kept and the
   output says so. Entities that no longer exist are skipped and reported, and the exit
-  code is 1.
+  code is 1, with `--dry-run` too, so a script can check before undoing.
 - The undo run saves its own undo file, so you can redo the original changes.
 - Each change is written to the undo file before it's sent, so if a run stops partway
   (for example because the connection drops), the undo file still covers every change
@@ -217,7 +217,7 @@ Done.
 | Code | Meaning |
 | --- | --- |
 | 0 | Success (or dry run completed) |
-| 1 | An error occurred: connection, authentication, keyring, undo file, one or more failed updates, or entities skipped by `--undo` |
+| 1 | An error occurred: connection, authentication, keyring, undo file, one or more failed updates, or entities skipped by `--undo` (also with `--dry-run`) |
 | 2 | Invalid command-line arguments |
 | 130 | Cancelled with Ctrl-C |
 

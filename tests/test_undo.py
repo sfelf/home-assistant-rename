@@ -192,6 +192,11 @@ class TestLoad:
         raw = json.dumps(HEADER) + "\n" + json.dumps({"change": CHANGE}) + '\n{"change": {"ent'
         assert len(load(self.write(tmp_path, raw=raw)).changes) == 1
 
+    def test_complete_but_malformed_last_line_is_an_error(self, tmp_path):
+        raw = json.dumps(HEADER) + "\n" + json.dumps({"change": CHANGE}) + '\n{"change": {"ent\n'
+        with pytest.raises(undo.UndoFileError, match="line 3"):
+            load(self.write(tmp_path, raw=raw))
+
     def test_corrupt_line_in_the_middle_is_an_error(self, tmp_path):
         raw = json.dumps(HEADER) + "\nnot json\n" + json.dumps({"change": CHANGE}) + "\n"
         with pytest.raises(undo.UndoFileError, match="line 2"):

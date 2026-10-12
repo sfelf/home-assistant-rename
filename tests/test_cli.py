@@ -500,6 +500,19 @@ class TestUndo:
         assert heater["name"] == "Backyard Station Heater"
         assert "entity ID: changed since to switch.garage_heater" in capsys.readouterr().out
 
+    def test_undo_dry_run_reports_entities_that_would_be_skipped(
+        self, fake_ha, memory_keyring, in_tmp_dir, capsys
+    ):
+        path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        fake_ha.entities = [
+            e for e in fake_ha.entities if e["entity_id"] != "switch.skyvane_station_heater"
+        ]
+        updates = len(fake_ha.updates)
+        assert cli.main(["--undo", str(path), "--dry-run"]) == 1
+        assert len(fake_ha.updates) == updates
+        out = capsys.readouterr().out
+        assert "Dry run only; nothing changed.\n1 recorded change(s) would be skipped." in out
+
     def test_undo_skips_missing_entities(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
         path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
         fake_ha.entities = [
@@ -564,6 +577,17 @@ class TestUndo:
 )
 def test_shell_quote(value, windows, expected):
     assert cli.shell_quote(value, windows=windows) == expected
+
+
+def test_suggested_command_works_for_paths_starting_with_dash(
+    fake_ha, memory_keyring, in_tmp_dir, capsys
+):
+    stored(memory_keyring, fake_ha)
+    assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url, "--undo-file=-backup.jsonl"]) == 0
+    out = capsys.readouterr().out
+    assert "To reverse these changes, run: ha-rename --undo=-backup.jsonl\n" in out
+    assert cli.main(["--undo=-backup.jsonl"]) == 0  # the suggested command, as printed
+    assert fake_ha.entities == SAMPLE_ENTITIES
 
 
 def test_unquotable_undo_path_is_not_shown_as_a_command(

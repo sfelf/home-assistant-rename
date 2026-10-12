@@ -226,6 +226,9 @@ async def run(
 
     if args.dry_run:
         print("\nDry run only; nothing changed.")
+        if failures:  # only --undo can fail without changing anything: skipped entities
+            print(f"{failures} recorded change(s) would be skipped.")
+            return 1
         return 0
     if failures:
         print(f"\nDone with {failures} error(s).")
@@ -264,10 +267,12 @@ async def _apply(
         if log is not None and not log.discard_if_empty():
             print(f"\nUndo file: {log.path}")
             quoted = shell_quote(str(log.path))
+            # "--undo=PATH" so a path starting with "-" isn't taken for an option.
+            option = "--undo=" if str(log.path).startswith("-") else "--undo "
             if quoted is None:
                 print("To reverse these changes, pass that file to: ha-rename --undo")
             else:
-                print(f"To reverse these changes, run: ha-rename --undo {quoted}")
+                print(f"To reverse these changes, run: ha-rename {option}{quoted}")
     return failures
 
 
