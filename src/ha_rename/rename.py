@@ -49,7 +49,8 @@ class Rename:
     """A planned change to one entity registry entry.
 
     ``current_name`` is the name as shown (the registry's custom name, else the
-    integration's); ``registry_name`` is the registry's custom ``name`` field itself.
+    integration's); ``registry_name`` is the registry's custom ``name`` field itself, and
+    ``registry_id`` the registry entry's ``id``.
     """
 
     entity_id: str
@@ -58,6 +59,7 @@ class Rename:
     new_name: str | None
     uses_device_name: bool = False
     registry_name: str | None = None
+    registry_id: str | None = None
 
     def to_change(self) -> Change:
         return Change(
@@ -65,6 +67,7 @@ class Rename:
             new_entity_id=self.new_entity_id,
             name=self.registry_name,
             new_name=self.new_name if self.new_name is not None else self.registry_name,
+            registry_id=self.registry_id,
         )
 
     @property
@@ -124,6 +127,7 @@ def plan_renames(
                 new_name=strip_name_prefix(current_name, name_prefix),
                 uses_device_name=bool(entry.get("has_entity_name")),
                 registry_name=entry.get("name"),
+                registry_id=entry.get("id"),
             )
         )
     return renames

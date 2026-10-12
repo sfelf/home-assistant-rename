@@ -76,9 +76,17 @@ class TestUndoLog:
                 "new_entity_id": "sensor.new_temp",
                 "name": None,
                 "new_name": "Temp",
+                "registry_id": None,
             }
         ]
         assert not (tmp_path / "undo.json.tmp").exists()
+
+    def test_forget_removes_rejected_change(self, tmp_path):
+        path = tmp_path / "undo.json"
+        log = UndoLog.create(path, URL)
+        log.record(RENAME)
+        log.forget(RENAME)
+        assert json.loads(path.read_text())["changes"] == []
 
     def test_never_overwrites_existing_file(self, tmp_path):
         path = tmp_path / "undo.json"
@@ -91,17 +99,26 @@ class TestUndoLog:
         with pytest.raises(undo.UndoFileError, match="could not create undo file"):
             UndoLog.create(tmp_path / "missing" / "undo.json", URL)
 
-    def test_record_failure_names_the_unrecorded_change(self, tmp_path, monkeypatch):
-        log = UndoLog.create(tmp_path / "undo.json", URL)
-
+    def fail_writes(self, monkeypatch):
         def fail(*args):
             raise OSError(28, "No space left on device")
 
         monkeypatch.setattr("os.replace", fail)
+
+    def test_record_failure_stops_before_the_change(self, tmp_path, monkeypatch):
+        log = UndoLog.create(tmp_path / "undo.json", URL)
+        self.fail_writes(monkeypatch)
         with pytest.raises(undo.UndoFileError) as exc:
             log.record(RENAME)
         assert "No space left on device" in str(exc.value)
-        assert "sensor.old_temp was applied but isn't in the undo file" in str(exc.value)
+        assert "Stopped before changing sensor.old_temp" in str(exc.value)
+
+    def test_forget_failure_explains_the_extra_entry(self, tmp_path, monkeypatch):
+        log = UndoLog.create(tmp_path / "undo.json", URL)
+        log.record(RENAME)
+        self.fail_writes(monkeypatch)
+        with pytest.raises(undo.UndoFileError, match="still lists sensor.old_temp"):
+            log.forget(RENAME)
 
     def test_discard_if_empty(self, tmp_path):
         path = tmp_path / "undo.json"
@@ -162,6 +179,16 @@ class TestLoad:
         with pytest.raises(undo.UndoFileError, match=message):
             load(self.write(tmp_path, data))
 
+    def test_not_utf8(self, tmp_path):
+        path = tmp_path / "undo.json"
+        path.write_bytes(b"\xff\xfe not text")
+        with pytest.raises(undo.UndoFileError, match="not a valid undo file"):
+            load(path)
+
+    def test_registry_id_is_optional(self, tmp_path):
+        [change] = load(self.write(tmp_path, self.valid())).changes
+        assert change.registry_id is None
+
     def test_invalid_url(self, tmp_path):
         with pytest.raises(undo.UndoFileError, match="invalid ha_url"):
             load(self.write(tmp_path, self.valid(ha_url=5)))
@@ -171,6 +198,13 @@ class TestLoad:
         [
             {"entity_id": "a.b", "new_entity_id": 5, "name": None, "new_name": None},
             {"entity_id": "a.b", "new_entity_id": "a.c", "name": 5, "new_name": None},
+            {
+                "entity_id": "a.b",
+                "new_entity_id": "a.c",
+                "name": None,
+                "new_name": None,
+                "registry_id": 5,
+            },
         ],
     )
     def test_invalid_change(self, tmp_path, change):
@@ -187,7 +221,10 @@ class TestPlanUndo:
     def test_reverses_id_and_name(self):
         entries = [entity("sensor.new_temp", name="Temp", original_name="Old Temp")]
         [step] = plan_undo(entries, [RENAME])
-        assert step == UndoStep(RENAME, Change("sensor.new_temp", "sensor.old_temp", "Temp", None))
+        assert step == UndoStep(
+            RENAME,
+            Change("sensor.new_temp", "sensor.old_temp", "Temp", None, "reg-sensor.new_temp"),
+        )
         assert step.describe() == [
             "sensor.new_temp",
             "  -> sensor.old_temp",
@@ -199,7 +236,7 @@ class TestPlanUndo:
         second = Change("a.two", "a.three", None, None)
         steps = plan_undo([entity("a.three")], [first, second])
         assert [s.recorded for s in steps] == [second, first]
-        assert steps[0].change == Change("a.three", "a.two", None, None)
+        assert steps[0].change.new_entity_id == "a.two"
         assert steps[1].change is None  # a.two doesn't exist yet when planning
 
     def test_missing_entity_is_skipped(self):
@@ -210,16 +247,46 @@ class TestPlanUndo:
             "  SKIPPED: not found in Home Assistant (renamed or removed since?)",
         ]
 
+    def test_finds_entity_by_registry_id_after_rename(self):
+        recorded = Change("sensor.old_temp", "sensor.new_temp", None, "Temp", "reg-1")
+        entries = [entity("sensor.mine", name="Temp", id="reg-1")]
+        [step] = plan_undo(entries, [recorded])
+        assert step.change == Change("sensor.mine", "sensor.mine", "Temp", None, "reg-1")
+        assert step.notes == ("entity ID: changed since to sensor.mine; left as is",)
+
+    def test_entity_with_same_id_but_different_registry_id_is_not_touched(self):
+        recorded = Change("sensor.old_temp", "sensor.new_temp", None, "Temp", "reg-1")
+        entries = [entity("sensor.new_temp", name="Temp", id="reg-2")]
+        [step] = plan_undo(entries, [recorded])
+        assert step.change is None
+        assert step.describe()[-1] == "  SKIPPED: not found in Home Assistant (removed since?)"
+
+    def test_change_that_was_never_applied_is_left_alone(self):
+        recorded = Change("sensor.old_temp", "sensor.new_temp", None, "Temp", "reg-1")
+        entries = [entity("sensor.old_temp", id="reg-1")]
+        [step] = plan_undo(entries, [recorded])
+        assert not step.change.has_changes
+        assert step.notes == ()
+        assert step.describe() == [
+            "sensor.old_temp",
+            "  nothing to undo (already as it was before)",
+        ]
+
     def test_name_changed_since_is_left_alone(self):
         entries = [entity("sensor.new_temp", name="My own name")]
         [step] = plan_undo(entries, [RENAME])
-        assert step.change == Change(
-            "sensor.new_temp", "sensor.old_temp", "My own name", "My own name"
-        )
+        assert step.change.new_name == "My own name"
         assert step.describe()[-1] == "  name: changed since to 'My own name'; left as is"
+
+    def test_name_already_restored_needs_no_note(self):
+        [step] = plan_undo([entity("sensor.new_temp", name=None)], [RENAME])
+        assert step.change.new_name is None
+        assert step.notes == ()
 
     def test_id_only_change_keeps_current_name(self):
         recorded = Change("sensor.old", "sensor.new", "Same", "Same")
         [step] = plan_undo([entity("sensor.new", name="Edited")], [recorded])
-        assert step.change == Change("sensor.new", "sensor.old", "Edited", "Edited")
-        assert step.note is None
+        assert step.change == Change(
+            "sensor.new", "sensor.old", "Edited", "Edited", "reg-sensor.new"
+        )
+        assert step.notes == ()

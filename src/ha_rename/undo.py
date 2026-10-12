@@ -26,13 +26,15 @@ class Change:
     """One entity registry update: the entity ID and registry name before and after.
 
     The names are the registry's ``name`` field, which is None when the entity uses the
-    name supplied by its integration.
+    name supplied by its integration. ``registry_id`` is the registry entry's own ``id``,
+    which stays the same when the entity is renamed.
     """
 
     entity_id: str
     new_entity_id: str
     name: str | None
     new_name: str | None
+    registry_id: str | None = None
 
     @property
     def renames_entity(self) -> bool:
@@ -69,7 +71,13 @@ class Change:
 
 
 class UndoLog:
-    """An undo file that is updated after every change Home Assistant accepts."""
+    """An undo file listing every change sent to Home Assistant.
+
+    Each change is recorded *before* it is sent and removed again only if Home Assistant
+    rejects it, so a change whose reply is lost (e.g. the connection drops) is still in
+    the file. :func:`plan_undo` checks the registry, so a change that was recorded but
+    never applied is simply left alone.
+    """
 
     def __init__(self, path: Path, url: str):
         self.path = path
@@ -89,15 +97,23 @@ class UndoLog:
         return log
 
     def record(self, change: Change) -> None:
+        """Record ``change`` before it is sent."""
         self.changes.append(change)
+        self._write(f"Stopped before changing {change.entity_id}")
+
+    def forget(self, change: Change) -> None:
+        """Remove ``change`` after Home Assistant rejected it."""
+        self.changes.remove(change)
+        self._write(f"It still lists {change.entity_id}, which wasn't changed")
+
+    def _write(self, consequence: str) -> None:
         tmp = self.path.with_name(self.path.name + ".tmp")
         try:
             tmp.write_text(self._dump(), encoding="utf-8")
             os.replace(tmp, self.path)
         except OSError as e:
             raise UndoFileError(
-                f"could not update undo file {self.path}: {e.strerror or e}. Stopped; the "
-                f"change to {change.entity_id} was applied but isn't in the undo file"
+                f"could not update undo file {self.path}: {e.strerror or e}. {consequence}"
             ) from e
 
     def discard_if_empty(self) -> bool:
@@ -129,12 +145,12 @@ class UndoFile:
 
 def _change_from_json(data: Any) -> Change:
     ids = [data["entity_id"], data["new_entity_id"]]
-    names = [data["name"], data["new_name"]]
+    optional = [data["name"], data["new_name"], data.get("registry_id")]
     if not all(isinstance(v, str) for v in ids) or not all(
-        v is None or isinstance(v, str) for v in names
+        v is None or isinstance(v, str) for v in optional
     ):
         raise ValueError(f"invalid change {data!r}")
-    return Change(*ids, *names)
+    return Change(*ids, *optional)
 
 
 def load(path: Path) -> UndoFile:
@@ -143,7 +159,7 @@ def load(path: Path) -> UndoFile:
         data = json.loads(path.read_text(encoding="utf-8"))
     except OSError as e:
         raise UndoFileError(f"could not read undo file {path}: {e.strerror or e}") from e
-    except json.JSONDecodeError as e:
+    except ValueError as e:  # invalid JSON or text that isn't UTF-8
         raise UndoFileError(f"{path} is not a valid undo file: {e}") from e
 
     try:
@@ -171,38 +187,56 @@ class UndoStep:
 
     recorded: Change
     change: Change | None  # None when the entity can't be found
-    note: str | None = None
+    notes: tuple[str, ...] = ()
 
     def describe(self) -> list[str]:
         if self.change is None:
-            return [self.recorded.new_entity_id, f"  SKIPPED: {self.note}"]
-        lines = self.change.describe()
-        if self.note:
-            lines.append(f"  {self.note}")
-        return lines
+            return [self.recorded.new_entity_id, *(f"  SKIPPED: {n}" for n in self.notes)]
+        if not self.change.has_changes and not self.notes:
+            return [self.change.entity_id, "  nothing to undo (already as it was before)"]
+        return [*self.change.describe(), *(f"  {n}" for n in self.notes)]
+
+
+def _find(recorded: Change, entries: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The registry entry ``recorded`` changed: by registry id if known, else by entity ID."""
+    if recorded.registry_id is not None:
+        return next((e for e in entries if e.get("id") == recorded.registry_id), None)
+    return next((e for e in entries if e["entity_id"] == recorded.new_entity_id), None)
 
 
 def plan_undo(entries: list[dict[str, Any]], changes: list[Change]) -> list[UndoStep]:
-    """Work out how to reverse ``changes``, newest first."""
-    by_id = {entry["entity_id"]: entry for entry in entries}
+    """Work out how to reverse ``changes``, newest first.
+
+    Each change is compared with the entity's current state: only what still matches the
+    recorded "after" state is put back, so edits made since are kept, and a recorded
+    change that was never applied is left alone.
+    """
     steps = []
     for recorded in reversed(changes):
-        entry = by_id.get(recorded.new_entity_id)
+        entry = _find(recorded, entries)
         if entry is None:
-            steps.append(
-                UndoStep(recorded, None, "not found in Home Assistant (renamed or removed since?)")
-            )
+            reason = "not found in Home Assistant (renamed or removed since?)"
+            if recorded.registry_id is not None:
+                reason = "not found in Home Assistant (removed since?)"
+            steps.append(UndoStep(recorded, None, (reason,)))
             continue
 
+        current_id = entry["entity_id"]
         current_name = entry.get("name")
-        restored_name = current_name
-        note = None
-        if recorded.changes_name:
-            if current_name == recorded.new_name:
-                restored_name = recorded.name
-            else:
-                note = f"name: changed since to {_show_name(current_name)}; left as is"
+        notes = []
 
-        change = Change(recorded.new_entity_id, recorded.entity_id, current_name, restored_name)
-        steps.append(UndoStep(recorded, change, note))
+        restored_id = current_id
+        if current_id == recorded.new_entity_id:
+            restored_id = recorded.entity_id
+        elif current_id != recorded.entity_id:
+            notes.append(f"entity ID: changed since to {current_id}; left as is")
+
+        restored_name = current_name
+        if recorded.changes_name and current_name not in (recorded.name, recorded.new_name):
+            notes.append(f"name: changed since to {_show_name(current_name)}; left as is")
+        elif recorded.changes_name and current_name == recorded.new_name:
+            restored_name = recorded.name
+
+        change = Change(current_id, restored_id, current_name, restored_name, entry.get("id"))
+        steps.append(UndoStep(recorded, change, tuple(notes)))
     return steps

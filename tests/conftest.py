@@ -57,6 +57,8 @@ def in_tmp_dir(tmp_path, monkeypatch):
 
 def entity(entity_id: str, name: str | None = None, original_name: str | None = None, **extra):
     return {
+        # Home Assistant's registry id: fixed for the entry's lifetime, unlike entity_id.
+        "id": f"reg-{entity_id}",
         "entity_id": entity_id,
         "name": name,
         "original_name": original_name,
@@ -90,6 +92,7 @@ class FakeHomeAssistant:
         self.token = token
         self.updates: list[dict[str, Any]] = []
         self.fail_updates: set[str] = set()
+        self.drop_after_update: set[str] = set()  # apply, then close without replying
         self.first_message: dict[str, Any] = {"type": "auth_required", "ha_version": "2026.10.0"}
         self.url = ""
 
@@ -108,7 +111,11 @@ class FakeHomeAssistant:
             # Interleave unrelated traffic so the client has to match replies by id.
             await ws.send(json.dumps({"id": 0, "type": "event", "event": {}}))
             await ws.send(json.dumps({"id": msg["id"], "type": "event", "event": {}}))
-            await ws.send(json.dumps(self.respond(msg)))
+            reply = self.respond(msg)
+            if msg.get("entity_id") in self.drop_after_update:
+                await ws.close()
+                return
+            await ws.send(json.dumps(reply))
 
     def respond(self, msg: dict[str, Any]) -> dict[str, Any]:
         reply = {"id": msg["id"], "type": "result"}

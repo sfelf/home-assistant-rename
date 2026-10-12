@@ -2,7 +2,9 @@
 
 import argparse
 import asyncio
+import os
 import shlex
+import subprocess
 import sys
 from collections.abc import Callable
 from datetime import datetime
@@ -160,6 +162,11 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
         parser.error(str(e))
 
 
+def shell_quote(value: str, *, windows: bool = os.name == "nt") -> str:
+    """Quote ``value`` for pasting into a shell: cmd.exe/PowerShell on Windows, else POSIX."""
+    return subprocess.list2cmdline([value]) if windows else shlex.quote(value)
+
+
 def default_undo_path() -> Path:
     """A timestamped file name in the current directory, numbered if already taken."""
     stem = f"ha-rename-undo-{datetime.now():%Y%m%d-%H%M%S}"
@@ -228,17 +235,18 @@ async def _apply(
             print("\n".join(lines))
             if log is None or change is None or not change.has_changes:
                 continue
+            # Record first: if the reply is lost, the change may still have been applied.
+            log.record(change)
             try:
                 await ha.call(change.payload())
             except client.CommandError as e:
+                log.forget(change)
                 failures += 1
                 print(f"  ERROR: {e}")
-                continue
-            log.record(change)
     finally:
         if log is not None and not log.discard_if_empty():
             print(f"\nUndo file: {log.path}")
-            print(f"To reverse these changes, run: ha-rename --undo {shlex.quote(str(log.path))}")
+            print(f"To reverse these changes, run: ha-rename --undo {shell_quote(str(log.path))}")
     return failures
 
 
@@ -295,6 +303,6 @@ def main(argv: list[str] | None = None) -> int:
     except client.HomeAssistantError as e:
         return _error(str(e))
     except (OSError, websockets.exceptions.WebSocketException) as e:
-        return _error(f"could not connect to {url}: {e}")
+        return _error(f"connection to {url} failed: {e}")
     except KeyboardInterrupt:
         return 130

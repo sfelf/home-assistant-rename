@@ -90,6 +90,7 @@ class TestPlanRenames:
                 "sensor.skyvane_station_temperature",
                 "Backyard Station Temperature",
                 "Temperature",
+                registry_id="reg-sensor.skyvane_skyvane_station_backyard_station_temperature",
             ),
             Rename(
                 "switch.skyvane_skyvane_station_backyard_station_heater",
@@ -97,6 +98,7 @@ class TestPlanRenames:
                 "Backyard Station Heater",
                 "Heater",
                 registry_name="Backyard Station Heater",
+                registry_id="reg-switch.skyvane_skyvane_station_backyard_station_heater",
             ),
             Rename(
                 "sensor.skyvane_skyvane_station_backyard_station_humidity",
@@ -104,6 +106,7 @@ class TestPlanRenames:
                 "Humidity",
                 None,
                 uses_device_name=True,
+                registry_id="reg-sensor.skyvane_skyvane_station_backyard_station_humidity",
             ),
         ]
 

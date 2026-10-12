@@ -149,8 +149,8 @@ Done.
 
 ### Undoing changes
 
-Every run that changes something saves an undo file listing each change Home Assistant
-accepted: the entity ID and name before and after. By default it's
+Every run that changes something saves an undo file listing each change sent to Home
+Assistant: the entity ID and name before and after. By default it's
 `ha-rename-undo-<date>-<time>.json` in the current directory; choose another location
 with `--undo-file`. The file doesn't contain your access token. Dry runs, and runs that
 change nothing, don't save one.
@@ -184,11 +184,16 @@ Done.
 - Names are restored exactly. A name that came from the integration, shown as
   `(integration's name)`, goes back to following the integration rather than being
   fixed to a copy of the old text.
-- If you've renamed an entity yourself since, your name is kept and the output says
-  so. Entities that no longer exist are skipped and reported, and the exit code is 1.
+- Entities are matched by Home Assistant's internal registry ID, which doesn't change
+  when an entity is renamed. Undo still finds an entity whose ID you've changed since,
+  and never touches a different entity that has since taken over the same ID.
+- If you've changed an entity's ID or name yourself since, your change is kept and the
+  output says so. Entities that no longer exist are skipped and reported, and the exit
+  code is 1.
 - The undo run saves its own undo file, so you can redo the original changes.
-- If a run stops partway (for example after an error), its undo file still lists every
-  change that was applied up to that point.
+- Each change is written to the undo file before it's sent, so if a run stops partway
+  (for example because the connection drops), the undo file still covers every change
+  that may have been applied. Any that weren't are shown as "nothing to undo".
 
 ### Options
 

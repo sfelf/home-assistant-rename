@@ -282,13 +282,13 @@ class TestMain:
         url = "ws://127.0.0.1:1/api/websocket"
         store(memory_keyring, url)
         assert cli.main([*PREFIX_ARGS, "--ha-url", url]) == 1
-        assert f"could not connect to {url}" in capsys.readouterr().err
+        assert f"connection to {url} failed" in capsys.readouterr().err
 
     def test_invalid_url(self, memory_keyring, capsys):
         url = "http://not-a-websocket-url"
         store(memory_keyring, url)
         assert cli.main([*PREFIX_ARGS, "--ha-url", url]) == 1
-        assert f"could not connect to {url}" in capsys.readouterr().err
+        assert f"connection to {url} failed" in capsys.readouterr().err
 
     def test_run_without_callback(self, fake_ha, capsys):
         import asyncio
@@ -329,18 +329,21 @@ class TestUndoFile:
                 "new_entity_id": "sensor.skyvane_station_temperature",
                 "name": None,
                 "new_name": "Temperature",
+                "registry_id": "reg-sensor.skyvane_skyvane_station_backyard_station_temperature",
             },
             {
                 "entity_id": "switch.skyvane_skyvane_station_backyard_station_heater",
                 "new_entity_id": "switch.skyvane_station_heater",
                 "name": "Backyard Station Heater",
                 "new_name": "Heater",
+                "registry_id": "reg-switch.skyvane_skyvane_station_backyard_station_heater",
             },
             {
                 "entity_id": "sensor.skyvane_skyvane_station_backyard_station_humidity",
                 "new_entity_id": "sensor.skyvane_station_humidity",
                 "name": None,
                 "new_name": None,
+                "registry_id": "reg-sensor.skyvane_skyvane_station_backyard_station_humidity",
             },
         ]
         out = capsys.readouterr().out
@@ -400,8 +403,25 @@ class TestUndoFile:
 
         monkeypatch.setattr("os.replace", fail)
         assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 1
-        assert len(fake_ha.updates) == 1  # stopped after the first change
-        assert "isn't in the undo file" in capsys.readouterr().err
+        assert fake_ha.updates == []  # each change is recorded before it's sent
+        err = capsys.readouterr().err
+        assert "Stopped before changing sensor.skyvane_skyvane_station_backyard_station" in err
+
+    def test_change_with_lost_reply_is_still_recorded(
+        self, fake_ha, memory_keyring, in_tmp_dir, capsys
+    ):
+        stored(memory_keyring, fake_ha)
+        heater = "switch.skyvane_skyvane_station_backyard_station_heater"
+        fake_ha.drop_after_update = {heater}
+        assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 1
+        assert "failed" in capsys.readouterr().err
+        [path] = undo_files(in_tmp_dir)
+        recorded = [c["entity_id"] for c in json.loads(path.read_text())["changes"]]
+        assert recorded[-1] == heater  # applied, but the reply never arrived
+        fake_ha.drop_after_update = set()
+        assert cli.main(["--undo", str(path)]) == 0
+        assert fake_ha.find(heater)["name"] == "Backyard Station Heater"
+        assert fake_ha.find("sensor.skyvane_skyvane_station_backyard_station_temperature")
 
 
 def test_default_undo_path_is_numbered_when_taken(in_tmp_dir, monkeypatch):
@@ -457,6 +477,25 @@ class TestUndo:
         assert cli.main(["--undo", str(redo)]) == 0
         assert fake_ha.entities == renamed
 
+    def test_undo_ignores_replacement_with_same_entity_id(
+        self, fake_ha, memory_keyring, in_tmp_dir, capsys
+    ):
+        path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        heater = fake_ha.find("switch.skyvane_station_heater")
+        heater["id"] = "reg-a-different-entity"  # removed, then a new entity took its ID
+        assert cli.main(["--undo", str(path)]) == 1
+        assert heater["entity_id"] == "switch.skyvane_station_heater"
+        assert "SKIPPED: not found in Home Assistant (removed since?)" in capsys.readouterr().out
+
+    def test_undo_follows_entities_renamed_since(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        heater = fake_ha.find("switch.skyvane_station_heater")
+        heater["entity_id"] = "switch.garage_heater"
+        assert cli.main(["--undo", str(path)]) == 0
+        assert heater["entity_id"] == "switch.garage_heater"
+        assert heater["name"] == "Backyard Station Heater"
+        assert "entity ID: changed since to switch.garage_heater" in capsys.readouterr().out
+
     def test_undo_skips_missing_entities(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
         path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
         fake_ha.entities = [
@@ -500,6 +539,19 @@ class TestUndo:
         UndoLog.create(in_tmp_dir / "empty.json", "ws://ha.test/api/websocket")
         assert cli.main(["--undo", "empty.json"]) == 0
         assert "Nothing to undo" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "value, windows, expected",
+    [
+        ("undo.json", False, "undo.json"),
+        ("my undo.json", False, "'my undo.json'"),
+        ("undo.json", True, "undo.json"),
+        ("C:\\My Files\\undo.json", True, '"C:\\My Files\\undo.json"'),
+    ],
+)
+def test_shell_quote(value, windows, expected):
+    assert cli.shell_quote(value, windows=windows) == expected
 
 
 def test_python_dash_m():
