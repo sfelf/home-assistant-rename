@@ -14,4 +14,4 @@ htmlcov/
 coverage.xml
 
 # Undo files written by ha-rename
-ha-rename-undo-*.json
+ha-rename-undo-*.jsonl

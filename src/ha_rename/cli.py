@@ -3,8 +3,8 @@
 import argparse
 import asyncio
 import os
+import re
 import shlex
-import subprocess
 import sys
 from collections.abc import Callable
 from datetime import datetime
@@ -49,9 +49,9 @@ examples:
       --entity-name-prefix "Backyard Station"
 
   Run the same command without --dry-run to apply it. It saves an undo file such
-  as ha-rename-undo-20261011-224433.json; to reverse those changes:
+  as ha-rename-undo-20261011-224433.jsonl; to reverse those changes:
 
-    ha-rename --undo ha-rename-undo-20261011-224433.json
+    ha-rename --undo ha-rename-undo-20261011-224433.jsonl
 
 shell completion:
   zsh:   ha-rename --print-completion zsh > ~/.zfunc/_ha-rename
@@ -110,7 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--undo-file",
         metavar="PATH",
         type=Path,
-        help="where to save the undo file (default: ha-rename-undo-<date>-<time>.json "
+        help="where to save the undo file (default: ha-rename-undo-<date>-<time>.jsonl "
         "in the current directory)",
     ).complete = shtab.FILE
 
@@ -162,19 +162,36 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
         parser.error(str(e))
 
 
-def shell_quote(value: str, *, windows: bool = os.name == "nt") -> str:
-    """Quote ``value`` for pasting into a shell: cmd.exe/PowerShell on Windows, else POSIX."""
-    return subprocess.list2cmdline([value]) if windows else shlex.quote(value)
+_PLAIN = re.compile(r"[A-Za-z0-9_./:-]+")
+_PLAIN_WINDOWS = re.compile(r"[A-Za-z0-9_./:\\-]+")
+# Characters cmd.exe or PowerShell still interpret inside double quotes.
+_UNQUOTABLE_ON_WINDOWS = set('%!$`"')
+
+
+def shell_quote(value: str, *, windows: bool = os.name == "nt") -> str | None:
+    """Quote ``value`` so it's safe to paste into a shell, or None if that isn't possible.
+
+    POSIX quoting handles anything. On Windows no quoting is safe in both cmd.exe and
+    PowerShell for every character, so double quotes are used where they are, and None
+    is returned otherwise.
+    """
+    if (_PLAIN_WINDOWS if windows else _PLAIN).fullmatch(value):
+        return value
+    if not windows:
+        return shlex.quote(value)
+    if _UNQUOTABLE_ON_WINDOWS.intersection(value):
+        return None
+    return f'"{value}"'
 
 
 def default_undo_path() -> Path:
     """A timestamped file name in the current directory, numbered if already taken."""
     stem = f"ha-rename-undo-{datetime.now():%Y%m%d-%H%M%S}"
-    path = Path(f"{stem}.json")
+    path = Path(f"{stem}.jsonl")
     n = 1
     while path.exists():
         n += 1
-        path = Path(f"{stem}-{n}.json")
+        path = Path(f"{stem}-{n}.jsonl")
     return path
 
 
@@ -246,7 +263,11 @@ async def _apply(
     finally:
         if log is not None and not log.discard_if_empty():
             print(f"\nUndo file: {log.path}")
-            print(f"To reverse these changes, run: ha-rename --undo {shell_quote(str(log.path))}")
+            quoted = shell_quote(str(log.path))
+            if quoted is None:
+                print("To reverse these changes, pass that file to: ha-rename --undo")
+            else:
+                print(f"To reverse these changes, run: ha-rename --undo {quoted}")
     return failures
 
 

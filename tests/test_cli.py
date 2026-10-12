@@ -1,10 +1,11 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
-from ha_rename import __version__, cli
+from ha_rename import __version__, cli, undo
 from ha_rename.undo import UndoLog
 from tests.conftest import GOOD_TOKEN, SAMPLE_ENTITIES
 
@@ -308,7 +309,7 @@ class TestMain:
 
 
 def undo_files(directory):
-    return sorted(directory.glob("ha-rename-undo-*.json"))
+    return sorted(directory.glob("ha-rename-undo-*.jsonl"))
 
 
 def stored(memory_keyring, fake_ha):
@@ -321,9 +322,9 @@ class TestUndoFile:
         stored(memory_keyring, fake_ha)
         assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 0
         [path] = undo_files(in_tmp_dir)
-        data = json.loads(path.read_text())
-        assert data["ha_url"] == fake_ha.url
-        assert data["changes"] == [
+        header, *entries = [json.loads(line) for line in path.read_text().splitlines()]
+        assert header["ha_url"] == fake_ha.url
+        assert [entry["change"] for entry in entries] == [
             {
                 "entity_id": "sensor.skyvane_skyvane_station_backyard_station_temperature",
                 "new_entity_id": "sensor.skyvane_station_temperature",
@@ -352,9 +353,9 @@ class TestUndoFile:
 
     def test_undo_file_option(self, fake_ha, memory_keyring, in_tmp_dir):
         stored(memory_keyring, fake_ha)
-        target = in_tmp_dir / "my undo.json"
+        target = in_tmp_dir / "my undo.jsonl"
         assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url, "--undo-file", str(target)]) == 0
-        assert len(json.loads(target.read_text())["changes"]) == 3
+        assert len(undo.load(target).changes) == 3
         assert undo_files(in_tmp_dir) == []
 
     def test_dry_run_writes_no_undo_file(self, fake_ha, memory_keyring, in_tmp_dir):
@@ -374,7 +375,7 @@ class TestUndoFile:
         fake_ha.fail_updates = {"switch.skyvane_skyvane_station_backyard_station_heater"}
         assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 1
         [path] = undo_files(in_tmp_dir)
-        recorded = [c["entity_id"] for c in json.loads(path.read_text())["changes"]]
+        recorded = [c.entity_id for c in undo.load(path).changes]
         assert "switch.skyvane_skyvane_station_backyard_station_heater" not in recorded
         assert len(recorded) == 2
 
@@ -388,7 +389,7 @@ class TestUndoFile:
         self, fake_ha, memory_keyring, in_tmp_dir, capsys
     ):
         stored(memory_keyring, fake_ha)
-        existing = in_tmp_dir / "taken.json"
+        existing = in_tmp_dir / "taken.jsonl"
         existing.write_text("{}")
         argv = [*PREFIX_ARGS, "--ha-url", fake_ha.url, "--undo-file", str(existing)]
         assert cli.main(argv) == 1
@@ -397,11 +398,14 @@ class TestUndoFile:
 
     def test_undo_file_update_failure_stops_run(self, fake_ha, memory_keyring, monkeypatch, capsys):
         stored(memory_keyring, fake_ha)
+        real_open = Path.open
 
-        def fail(*args):
-            raise OSError(28, "No space left on device")
+        def open_(self, mode="r", *args, **kwargs):
+            if mode == "a":
+                raise OSError(28, "No space left on device")
+            return real_open(self, mode, *args, **kwargs)
 
-        monkeypatch.setattr("os.replace", fail)
+        monkeypatch.setattr(Path, "open", open_)
         assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 1
         assert fake_ha.updates == []  # each change is recorded before it's sent
         err = capsys.readouterr().err
@@ -416,7 +420,7 @@ class TestUndoFile:
         assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 1
         assert "failed" in capsys.readouterr().err
         [path] = undo_files(in_tmp_dir)
-        recorded = [c["entity_id"] for c in json.loads(path.read_text())["changes"]]
+        recorded = [c.entity_id for c in undo.load(path).changes]
         assert recorded[-1] == heater  # applied, but the reply never arrived
         fake_ha.drop_after_update = set()
         assert cli.main(["--undo", str(path)]) == 0
@@ -436,9 +440,9 @@ def test_default_undo_path_is_numbered_when_taken(in_tmp_dir, monkeypatch):
 
     monkeypatch.setattr(cli, "datetime", Frozen)
     second = cli.default_undo_path()
-    assert second.name == f"{first.stem}-2.json"
+    assert second.name == f"{first.stem}-2.jsonl"
     second.write_text("{}")
-    assert cli.default_undo_path().name == f"{first.stem}-3.json"
+    assert cli.default_undo_path().name == f"{first.stem}-3.jsonl"
 
 
 class TestUndo:
@@ -471,7 +475,7 @@ class TestUndo:
     def test_undo_writes_its_own_undo_file_for_redo(self, fake_ha, memory_keyring, in_tmp_dir):
         path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
         renamed = [dict(e) for e in fake_ha.entities]
-        redo = in_tmp_dir / "redo.json"
+        redo = in_tmp_dir / "redo.jsonl"
         assert cli.main(["--undo", str(path), "--undo-file", str(redo)]) == 0
         assert fake_ha.entities == SAMPLE_ENTITIES
         assert cli.main(["--undo", str(redo)]) == 0
@@ -525,33 +529,52 @@ class TestUndo:
     @pytest.mark.parametrize("option", ["--old-id-prefix", "--new-id-prefix"])
     def test_undo_cannot_be_combined_with_rename_options(self, option, capsys):
         with pytest.raises(SystemExit) as exc:
-            cli.main(["--undo", "x.json", option, "abc_"])
+            cli.main(["--undo", "x.jsonl", option, "abc_"])
         assert exc.value.code == 2
         assert f"--undo can't be combined with {option}" in capsys.readouterr().err
 
     def test_bad_undo_file_fails_before_prompting(self, in_tmp_dir, capsys):
-        (in_tmp_dir / "bad.json").write_text("nope")
+        (in_tmp_dir / "bad.jsonl").write_text("nope")
         # The autouse no_prompt fixture fails the test if a token is asked for.
-        assert cli.main(["--undo", "bad.json"]) == 1
-        assert "bad.json is not a valid undo file" in capsys.readouterr().err
+        assert cli.main(["--undo", "bad.jsonl"]) == 1
+        assert "bad.jsonl is not a valid undo file" in capsys.readouterr().err
 
     def test_empty_undo_file(self, in_tmp_dir, capsys):
-        UndoLog.create(in_tmp_dir / "empty.json", "ws://ha.test/api/websocket")
-        assert cli.main(["--undo", "empty.json"]) == 0
+        UndoLog.create(in_tmp_dir / "empty.jsonl", "ws://ha.test/api/websocket")
+        assert cli.main(["--undo", "empty.jsonl"]) == 0
         assert "Nothing to undo" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
     "value, windows, expected",
     [
-        ("undo.json", False, "undo.json"),
-        ("my undo.json", False, "'my undo.json'"),
-        ("undo.json", True, "undo.json"),
-        ("C:\\My Files\\undo.json", True, '"C:\\My Files\\undo.json"'),
+        ("undo.jsonl", False, "undo.jsonl"),
+        ("/tmp/undo-1.jsonl", False, "/tmp/undo-1.jsonl"),
+        ("my undo.jsonl", False, "'my undo.jsonl'"),
+        ("foo&whoami.jsonl", False, "'foo&whoami.jsonl'"),
+        ("it's.jsonl", False, "'it'\"'\"'s.jsonl'"),
+        ("C:\\Users\\me\\undo.jsonl", True, "C:\\Users\\me\\undo.jsonl"),
+        ("C:\\My Files\\undo.jsonl", True, '"C:\\My Files\\undo.jsonl"'),
+        ("foo&whoami.jsonl", True, '"foo&whoami.jsonl"'),
+        ("a%PATH%.jsonl", True, None),
+        ("a!x!.jsonl", True, None),
+        ("a$env:x.jsonl", True, None),
+        ("a`b.jsonl", True, None),
     ],
 )
 def test_shell_quote(value, windows, expected):
     assert cli.shell_quote(value, windows=windows) == expected
+
+
+def test_unquotable_undo_path_is_not_shown_as_a_command(
+    fake_ha, memory_keyring, monkeypatch, capsys
+):
+    stored(memory_keyring, fake_ha)
+    monkeypatch.setattr(cli, "shell_quote", lambda value: None)
+    assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 0
+    out = capsys.readouterr().out
+    assert "To reverse these changes, pass that file to: ha-rename --undo\n" in out
+    assert "run: ha-rename --undo" not in out
 
 
 def test_python_dash_m():

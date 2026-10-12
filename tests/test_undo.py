@@ -1,4 +1,5 @@
 import json
+from dataclasses import asdict
 
 import pytest
 
@@ -55,41 +56,56 @@ class TestChange:
         ]
 
 
-class TestUndoLog:
-    def test_create_writes_empty_log(self, tmp_path):
-        path = tmp_path / "undo.json"
-        UndoLog.create(path, URL)
-        data = json.loads(path.read_text())
-        assert data["format"] == "ha-rename-undo"
-        assert data["version"] == 1
-        assert data["created_by"] == f"ha-rename {__version__}"
-        assert data["ha_url"] == URL
-        assert data["changes"] == []
+def lines(path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
 
-    def test_record_updates_file_after_each_change(self, tmp_path):
-        path = tmp_path / "undo.json"
+
+RENAME_JSON = {
+    "entity_id": "sensor.old_temp",
+    "new_entity_id": "sensor.new_temp",
+    "name": None,
+    "new_name": "Temp",
+    "registry_id": None,
+}
+
+
+class TestUndoLog:
+    def test_create_writes_header(self, tmp_path):
+        path = tmp_path / "undo.jsonl"
         log = UndoLog.create(path, URL)
-        log.record(RENAME)
-        assert json.loads(path.read_text())["changes"] == [
+        assert lines(path) == [
             {
-                "entity_id": "sensor.old_temp",
-                "new_entity_id": "sensor.new_temp",
-                "name": None,
-                "new_name": "Temp",
-                "registry_id": None,
+                "format": "ha-rename-undo",
+                "version": 1,
+                "created_by": f"ha-rename {__version__}",
+                "created_at": log.created_at,
+                "ha_url": URL,
             }
         ]
-        assert not (tmp_path / "undo.json.tmp").exists()
 
-    def test_forget_removes_rejected_change(self, tmp_path):
-        path = tmp_path / "undo.json"
+    def test_record_appends_one_line_per_change(self, tmp_path):
+        path = tmp_path / "undo.jsonl"
+        log = UndoLog.create(path, URL)
+        other = Change("sensor.a", "sensor.b", None, None)
+        log.record(RENAME)
+        before = path.read_text()
+        log.record(other)
+        after = path.read_text()
+        assert after.startswith(before)  # appended, never rewritten
+        assert lines(path)[1:] == [{"change": RENAME_JSON}, {"change": {**asdict(other)}}]
+        assert log.changes == [RENAME, other]
+
+    def test_forget_marks_change_rejected(self, tmp_path):
+        path = tmp_path / "undo.jsonl"
         log = UndoLog.create(path, URL)
         log.record(RENAME)
         log.forget(RENAME)
-        assert json.loads(path.read_text())["changes"] == []
+        assert lines(path)[1:] == [{"change": RENAME_JSON}, {"rejected": 0}]
+        assert log.changes == []
+        assert load(path).changes == []
 
     def test_never_overwrites_existing_file(self, tmp_path):
-        path = tmp_path / "undo.json"
+        path = tmp_path / "undo.jsonl"
         path.write_text("keep me")
         with pytest.raises(undo.UndoFileError, match="could not create undo file"):
             UndoLog.create(path, URL)
@@ -97,124 +113,144 @@ class TestUndoLog:
 
     def test_create_in_missing_directory(self, tmp_path):
         with pytest.raises(undo.UndoFileError, match="could not create undo file"):
-            UndoLog.create(tmp_path / "missing" / "undo.json", URL)
+            UndoLog.create(tmp_path / "missing" / "undo.jsonl", URL)
 
-    def fail_writes(self, monkeypatch):
-        def fail(*args):
-            raise OSError(28, "No space left on device")
+    def fail_appends(self, log):
+        log.path.chmod(0o444)  # read-only, so appending fails
 
-        monkeypatch.setattr("os.replace", fail)
-
-    def test_record_failure_stops_before_the_change(self, tmp_path, monkeypatch):
-        log = UndoLog.create(tmp_path / "undo.json", URL)
-        self.fail_writes(monkeypatch)
+    def test_record_failure_stops_before_the_change(self, tmp_path):
+        log = UndoLog.create(tmp_path / "undo.jsonl", URL)
+        self.fail_appends(log)
         with pytest.raises(undo.UndoFileError) as exc:
             log.record(RENAME)
-        assert "No space left on device" in str(exc.value)
+        assert "could not update undo file" in str(exc.value)
         assert "Stopped before changing sensor.old_temp" in str(exc.value)
+        assert log.changes == []
 
-    def test_forget_failure_explains_the_extra_entry(self, tmp_path, monkeypatch):
-        log = UndoLog.create(tmp_path / "undo.json", URL)
+    def test_forget_failure_explains_the_extra_entry(self, tmp_path):
+        log = UndoLog.create(tmp_path / "undo.jsonl", URL)
         log.record(RENAME)
-        self.fail_writes(monkeypatch)
+        self.fail_appends(log)
         with pytest.raises(undo.UndoFileError, match="still lists sensor.old_temp"):
             log.forget(RENAME)
 
     def test_discard_if_empty(self, tmp_path):
-        path = tmp_path / "undo.json"
+        path = tmp_path / "undo.jsonl"
         log = UndoLog.create(path, URL)
         assert log.discard_if_empty()
         assert not path.exists()
 
+    def test_discards_when_every_change_was_rejected(self, tmp_path):
+        path = tmp_path / "undo.jsonl"
+        log = UndoLog.create(path, URL)
+        log.record(RENAME)
+        log.forget(RENAME)
+        assert log.discard_if_empty()
+        assert not path.exists()
+
     def test_keeps_file_with_changes(self, tmp_path):
-        path = tmp_path / "undo.json"
+        path = tmp_path / "undo.jsonl"
         log = UndoLog.create(path, URL)
         log.record(RENAME)
         assert not log.discard_if_empty()
         assert path.exists()
 
 
+HEADER = {"format": "ha-rename-undo", "version": 1, "ha_url": URL}
+CHANGE = {"entity_id": "a.b", "new_entity_id": "a.c", "name": None, "new_name": "C"}
+
+
 class TestLoad:
     def test_round_trip(self, tmp_path):
-        path = tmp_path / "undo.json"
+        path = tmp_path / "undo.jsonl"
         log = UndoLog.create(path, URL)
+        kept = Change("sensor.a", "sensor.b", None, None)
         log.record(RENAME)
+        log.record(kept)
+        log.forget(RENAME)
         loaded = load(path)
         assert loaded.path == path
         assert loaded.ha_url == URL
         assert loaded.created_at == log.created_at
-        assert loaded.changes == [RENAME]
+        assert loaded.changes == [kept]
 
-    def write(self, tmp_path, data):
-        path = tmp_path / "undo.json"
-        path.write_text(json.dumps(data) if not isinstance(data, str) else data)
+    def write(self, tmp_path, *items, raw=None):
+        path = tmp_path / "undo.jsonl"
+        text = raw if raw is not None else "".join(json.dumps(i) + "\n" for i in items)
+        path.write_text(text)
         return path
 
-    def valid(self, **overrides):
-        data = {
-            "format": "ha-rename-undo",
-            "version": 1,
-            "ha_url": URL,
-            "changes": [
-                {"entity_id": "a.b", "new_entity_id": "a.c", "name": None, "new_name": "C"}
-            ],
-        }
-        return {**data, **overrides}
+    def test_registry_id_is_optional(self, tmp_path):
+        [change] = load(self.write(tmp_path, HEADER, {"change": CHANGE})).changes
+        assert change == Change("a.b", "a.c", None, "C", None)
+
+    def test_blank_lines_are_ignored(self, tmp_path):
+        raw = json.dumps(HEADER) + "\n\n" + json.dumps({"change": CHANGE}) + "\n\n"
+        assert len(load(self.write(tmp_path, raw=raw)).changes) == 1
+
+    def test_half_written_last_line_is_ignored(self, tmp_path):
+        raw = json.dumps(HEADER) + "\n" + json.dumps({"change": CHANGE}) + '\n{"change": {"ent'
+        assert len(load(self.write(tmp_path, raw=raw)).changes) == 1
+
+    def test_corrupt_line_in_the_middle_is_an_error(self, tmp_path):
+        raw = json.dumps(HEADER) + "\nnot json\n" + json.dumps({"change": CHANGE}) + "\n"
+        with pytest.raises(undo.UndoFileError, match="line 2"):
+            load(self.write(tmp_path, raw=raw))
 
     def test_missing_file(self, tmp_path):
         with pytest.raises(undo.UndoFileError, match="could not read undo file"):
-            load(tmp_path / "nope.json")
-
-    @pytest.mark.parametrize(
-        "data, message",
-        [
-            ("{not json", "not a valid undo file"),
-            ([], "not a valid undo file"),
-            ({"format": "other"}, "not an ha-rename undo file"),
-            ({"format": "ha-rename-undo", "version": 2}, "unsupported version 2"),
-            ({"format": "ha-rename-undo", "version": 1}, "missing 'ha_url'"),
-        ],
-    )
-    def test_invalid_files(self, tmp_path, data, message):
-        with pytest.raises(undo.UndoFileError, match=message):
-            load(self.write(tmp_path, data))
+            load(tmp_path / "nope.jsonl")
 
     def test_not_utf8(self, tmp_path):
-        path = tmp_path / "undo.json"
+        path = tmp_path / "undo.jsonl"
         path.write_bytes(b"\xff\xfe not text")
         with pytest.raises(undo.UndoFileError, match="not a valid undo file"):
             load(path)
 
-    def test_registry_id_is_optional(self, tmp_path):
-        [change] = load(self.write(tmp_path, self.valid())).changes
-        assert change.registry_id is None
-
-    def test_invalid_url(self, tmp_path):
-        with pytest.raises(undo.UndoFileError, match="invalid ha_url"):
-            load(self.write(tmp_path, self.valid(ha_url=5)))
-
     @pytest.mark.parametrize(
-        "change",
+        "raw, message",
         [
-            {"entity_id": "a.b", "new_entity_id": 5, "name": None, "new_name": None},
-            {"entity_id": "a.b", "new_entity_id": "a.c", "name": 5, "new_name": None},
-            {
-                "entity_id": "a.b",
-                "new_entity_id": "a.c",
-                "name": None,
-                "new_name": None,
-                "registry_id": 5,
-            },
+            ("", "it's empty"),
+            ("{not json", "not a valid undo file"),
+            ("[]", "not an ha-rename undo file"),
+            ('{"format": "other"}', "not an ha-rename undo file"),
+            ('{"format": "ha-rename-undo", "version": 2}', "unsupported version 2"),
+            ('{"format": "ha-rename-undo", "version": 1}', "missing or invalid ha_url"),
+            ('{"format": "ha-rename-undo", "version": 1, "ha_url": 5}', "invalid ha_url"),
         ],
     )
-    def test_invalid_change(self, tmp_path, change):
-        with pytest.raises(undo.UndoFileError, match="invalid change"):
-            load(self.write(tmp_path, self.valid(changes=[change])))
+    def test_invalid_headers(self, tmp_path, raw, message):
+        with pytest.raises(undo.UndoFileError, match=message):
+            load(self.write(tmp_path, raw=raw))
 
-    def test_change_missing_field(self, tmp_path):
-        change = {"entity_id": "a.b", "new_entity_id": "a.c", "name": None}
-        with pytest.raises(undo.UndoFileError, match="missing 'new_name'"):
-            load(self.write(tmp_path, self.valid(changes=[change])))
+    @pytest.mark.parametrize(
+        "item, message",
+        [
+            ({"change": {**CHANGE, "new_entity_id": 5}}, "line 2: invalid change"),
+            ({"change": {**CHANGE, "name": 5}}, "line 2: invalid change"),
+            ({"change": {**CHANGE, "registry_id": 5}}, "line 2: invalid change"),
+            (
+                {"change": {"entity_id": "a.b", "new_entity_id": "a.c", "name": None}},
+                "line 2: missing 'new_name'",
+            ),
+            ({"change": "nope"}, "line 2"),
+            ({"rejected": 0}, "line 2: unexpected entry"),
+            ({"something": "else"}, "line 2: unexpected entry"),
+            ([1, 2], "line 2: unexpected entry"),
+        ],
+    )
+    def test_invalid_entries(self, tmp_path, item, message):
+        # Each bad entry is followed by a valid line, so it isn't taken for a cut-off write.
+        with pytest.raises(undo.UndoFileError, match=message):
+            load(self.write(tmp_path, HEADER, item, {"change": CHANGE}))
+
+    @pytest.mark.parametrize("value", [1, -1, True, "0"])
+    def test_invalid_rejected_index(self, tmp_path, value):
+        path = self.write(
+            tmp_path, HEADER, {"change": CHANGE}, {"rejected": value}, {"change": CHANGE}
+        )
+        with pytest.raises(undo.UndoFileError, match="line 3: unexpected entry"):
+            load(path)
 
 
 class TestPlanUndo:

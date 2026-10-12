@@ -141,8 +141,8 @@ When you're happy with the preview, run the same command without `--dry-run`. Th
 output ends with where the undo file was saved:
 
 ```
-Undo file: ha-rename-undo-20261011-224433.json
-To reverse these changes, run: ha-rename --undo ha-rename-undo-20261011-224433.json
+Undo file: ha-rename-undo-20261011-224433.jsonl
+To reverse these changes, run: ha-rename --undo ha-rename-undo-20261011-224433.jsonl
 
 Done.
 ```
@@ -150,19 +150,20 @@ Done.
 ### Undoing changes
 
 Every run that changes something saves an undo file listing each change sent to Home
-Assistant: the entity ID and name before and after. By default it's
-`ha-rename-undo-<date>-<time>.json` in the current directory; choose another location
+Assistant: the entity ID and name before and after. It's a [JSON Lines](https://jsonlines.org/)
+file, with one line added per change. By default it's
+`ha-rename-undo-<date>-<time>.jsonl` in the current directory; choose another location
 with `--undo-file`. The file doesn't contain your access token. Dry runs, and runs that
 change nothing, don't save one.
 
 To reverse a run, pass its undo file to `--undo` (add `--dry-run` to preview):
 
 ```bash
-ha-rename --undo ha-rename-undo-20261011-224433.json
+ha-rename --undo ha-rename-undo-20261011-224433.jsonl
 ```
 
 ```
-Undoing 3 change(s) from ha-rename-undo-20261011-224433.json
+Undoing 3 change(s) from ha-rename-undo-20261011-224433.jsonl
 
 sensor.skyvane_station_humidity
   -> sensor.skyvane_skyvane_station_backyard_station_humidity
@@ -173,8 +174,8 @@ sensor.skyvane_station_temperature
   -> sensor.skyvane_skyvane_station_backyard_station_temperature
   name: 'Temperature' -> (integration's name)
 
-Undo file: ha-rename-undo-20261011-224510.json
-To reverse these changes, run: ha-rename --undo ha-rename-undo-20261011-224510.json
+Undo file: ha-rename-undo-20261011-224510.jsonl
+To reverse these changes, run: ha-rename --undo ha-rename-undo-20261011-224510.jsonl
 
 Done.
 ```
@@ -203,7 +204,7 @@ Done.
 | `--new-id-prefix PREFIX` | yes, unless `--undo` | Replacement for the old prefix, e.g. `skyvane_station_`. Pass `""` to remove the old prefix. Lowercase letters, digits and underscores only. Must end with `_` exactly when `--old-id-prefix` does; otherwise the tool stops with an error, since the IDs would run together (`skyvane_stationtemperature`) or get a double underscore. |
 | `--entity-name-prefix TEXT` | yes, unless `--undo` | Text to remove from the start of matching entity names, e.g. `"Backyard Station"`. Quote it if it contains spaces. |
 | `--undo FILE` | no | Reverse the changes recorded in an undo file instead of renaming. Can't be combined with the three prefix options. See [Undoing changes](#undoing-changes). |
-| `--undo-file PATH` | no | Where to save the undo file. Default: `ha-rename-undo-<date>-<time>.json` in the current directory. An existing file is never overwritten; the run stops before changing anything. |
+| `--undo-file PATH` | no | Where to save the undo file. Default: `ha-rename-undo-<date>-<time>.jsonl` in the current directory. An existing file is never overwritten; the run stops before changing anything. |
 | `--ha-url URL` | no | Home Assistant WebSocket API URL. Default: `ws://homeassistant.local:8123/api/websocket`, or with `--undo` the URL recorded in the undo file. Use `wss://<host>/api/websocket` if Home Assistant is served over HTTPS (e.g. via Nabu Casa or a reverse proxy). |
 | `--dry-run` | no | Show what would change without changing anything. |
 | `--reset-token` | no | Ignore the saved access token and ask for a new one. The new token replaces the saved one once Home Assistant accepts it. |
