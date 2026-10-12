@@ -183,56 +183,9 @@ ha-rename --print-completion fish > ~/.config/fish/completions/ha-rename.fish
 
 Then open a new shell.
 
-## Development
-
-```bash
-git clone git@github.com:sfelf/home-assistant-rename.git
-cd home-assistant-rename
-uv run ha-rename --help
-uv run pytest
-uv run ruff check
-uv run ruff format
-```
-
-`uv run pytest` runs the test suite with a coverage report. The tests use a fake Home
-Assistant WebSocket server and an in-memory keyring, so they never touch a real
-instance or your real keyring. [Ruff](https://docs.astral.sh/ruff/) checks the code
-(`ruff check`, add `--fix` to apply fixes) and formats it (`ruff format`).
-
-`main` is protected: changes go in through pull requests, and a pull request can only
-be merged once the **All checks passed** status (lint plus the full test matrix) is
-green. [Dependabot](.github/dependabot.yml) opens weekly pull requests to keep GitHub
-Actions and Python dependencies up to date.
-
-Code layout (`src/ha_rename/`):
-
-- `cli.py`: command-line parsing and the main program flow
-- `rename.py`: works out which entities to rename and how (no I/O)
-- `client.py`: minimal Home Assistant WebSocket API client
-- `credentials.py`: saves the access token in the system keyring and prompts for it
-
-### Releasing
-
-1. Bump the version in `pyproject.toml`, e.g. `uv version --bump minor`, and commit it.
-2. Tag the commit and push the tag:
-
-   ```bash
-   git tag v0.2.0
-   git push origin v0.2.0
-   ```
-
-The [Release workflow](.github/workflows/release.yml) checks that the tag matches the
-version in `pyproject.toml`, runs the full test suite, builds the wheel and source
-archive, and creates a **draft** GitHub Release with them attached and generated
-release notes.
-
-3. Review and edit the notes on the draft under
-   [Releases](https://github.com/sfelf/home-assistant-rename/releases), then click
-   **Publish release**. Nothing is public until you do.
-
 ## License
 
-Copyright (C) 2026 Thomas Nelson
+Copyright (C) 2026 Home Assistant Rename Contributors
 
 This program is free software: you can redistribute it and/or modify it under the
 terms of the GNU Affero General Public License as published by the Free Software
