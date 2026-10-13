@@ -139,6 +139,16 @@ def apply_edits(config: Any, edits: Iterable[Edit], *, keys_first: bool = False)
     """
     result = EditResult(copy.deepcopy(config))
     edits = list(edits)
+    # Undoing: paths below a key that couldn't be put back would land in whatever entry
+    # has that key now, so they're left alone.
+    blocked: list[Path] = []
+
+    def is_blocked(edit: Edit) -> bool:
+        if any(edit.path[: len(b)] == b for b in blocked):
+            note = "under a key that wasn't put back; left as is"
+            result.notes.append(f"{format_path(edit.path)}: {note}")
+            return True
+        return False
 
     def node_at(path: Path) -> Any:
         """The value at ``path``, or ``_MISSING``."""
@@ -176,7 +186,7 @@ def apply_edits(config: Any, edits: Iterable[Edit], *, keys_first: bool = False)
         for depth in depths:
             # Retried while any applies: one may free the key another is renamed to
             # (a -> aa while aa -> aaa), in whichever order they come.
-            pending = [e for e in edits if e.is_key and len(e.path) == depth]
+            pending = [e for e in edits if e.is_key and len(e.path) == depth and not is_blocked(e)]
             while pending:
                 remaining = [edit for edit in pending if not apply_key(edit)]
                 if len(remaining) == len(pending):
@@ -184,11 +194,13 @@ def apply_edits(config: Any, edits: Iterable[Edit], *, keys_first: bool = False)
                 pending = remaining
             for edit in pending:
                 result.notes.append(f"{format_path(edit.path)}: changed since; left as is")
+                if keys_first:
+                    blocked.append((*edit.path[:-1], edit.new))
 
     if keys_first:
         apply_keys()
     for edit in edits:
-        if not edit.is_key:
+        if not edit.is_key and not is_blocked(edit):
             apply_value(edit)
     if not keys_first:
         apply_keys()

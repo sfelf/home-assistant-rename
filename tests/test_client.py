@@ -122,6 +122,11 @@ def test_rest_not_found(fake_ha):
     assert rest(fake_ha, "GET", "/api/config/automation/config/missing") is None
 
 
+def test_rest_write_not_found_is_an_error(fake_ha):
+    with pytest.raises(client.CommandError, match="http_404"):
+        rest(fake_ha, "POST", "/api/nope", {"id": "1"})
+
+
 def test_rest_post(fake_ha):
     config = {"id": "1", "alias": "Heater on"}
     assert rest(fake_ha, "POST", "/api/config/automation/config/1", config) == {"result": "ok"}

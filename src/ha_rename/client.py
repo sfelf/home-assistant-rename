@@ -90,8 +90,8 @@ class HomeAssistantClient:
     async def rest(self, method: str, path: str, body: Any = None) -> Any:
         """Send a REST request for ``path`` (e.g. ``/api/config/...``) and return its JSON.
 
-        Returns None if Home Assistant answers 404 Not Found, and raises CommandError for
-        any other error status.
+        Returns None if a GET is answered 404 Not Found, and raises CommandError for any
+        other error status (including a 404 for a write, which saved nothing).
         """
         request = urllib.request.Request(
             rest_base_url(self._url) + path,
@@ -110,7 +110,7 @@ def _send(request: urllib.request.Request) -> Any:
         with urllib.request.urlopen(request, timeout=REST_TIMEOUT) as response:
             return json.loads(response.read() or b"null")
     except urllib.error.HTTPError as e:
-        if e.code == 404:
+        if e.code == 404 and request.get_method() == "GET":
             return None
         try:
             message = json.loads(e.read())["message"]

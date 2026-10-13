@@ -285,6 +285,22 @@ class TestRevertEdits:
         assert reverted == SCENE
         assert list(reverted["entities"]) == list(SCENE["entities"])
 
+    def test_skips_below_a_key_that_wasnt_put_back(self):
+        config = {"sensor.a": {"entity": "light.a", "sensor.x": {}}}
+        renames = {"sensor.a": "sensor.b", "light.a": "light.b", "sensor.x": "sensor.y"}
+        edits, _ = scan(config, renames)
+        updated = apply_edits(config, edits).config
+        assert updated == {"sensor.b": {"entity": "light.b", "sensor.y": {}}}
+        # Since then, a new sensor.a entry was added, also referring to light.b.
+        updated["sensor.a"] = {"entity": "light.b", "sensor.y": {}}
+        result = revert_edits(updated, edits)
+        assert result.config == updated
+        assert result.notes == [
+            "['sensor.b']: changed since; left as is",
+            "['sensor.a']['sensor.y']: under a key that wasn't put back; left as is",
+            "['sensor.a'].entity: under a key that wasn't put back; left as is",
+        ]
+
     def test_keeps_later_edits(self):
         edits, _ = scan(AUTOMATION, RENAMES)
         updated = apply_edits(AUTOMATION, edits).config
