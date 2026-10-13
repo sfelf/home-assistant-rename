@@ -304,3 +304,25 @@ class TestSave:
     def test_unknown_kind(self, fake_ha):
         with pytest.raises(ValueError, match="unknown target kind 'group'"):
             self.save(fake_ha, "group", "x", {})
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["automation/config", "lovelace/config", "energy/get_prefs"],
+)
+def test_unexpected_read_errors_are_raised(fake_ha, command):
+    # Only "not found" means a target doesn't exist; anything else must stop the run.
+    fake_ha.states = [state("automation.garage", "Garage")]
+    fake_ha.add_dashboard("weather", {"views": []})
+    fake_ha.fail_commands = {command: "unauthorized"}
+    with pytest.raises(client.CommandError, match="unauthorized"):
+        load(fake_ha)
+
+
+@pytest.mark.parametrize(
+    "kind, command", [("dashboard", "lovelace/config"), ("energy", "energy/get_prefs")]
+)
+def test_unexpected_fetch_errors_are_raised(fake_ha, kind, command):
+    fake_ha.fail_commands = {command: "home_assistant_error"}
+    with pytest.raises(client.CommandError, match="home_assistant_error"):
+        run(fake_ha, lambda ha: targets.fetch(ha, kind, "x"))

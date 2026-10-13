@@ -236,9 +236,15 @@ async def run(
         entries = await ha.list_entities()
 
         plans: list[TargetPlan] = []
+        steps: list[undo.UndoStep] = []
+        references: list[ReferenceChange] = []
         if undo_file is not None:
-            items, failures = await _plan_undo(ha, entries, undo_file)
-            print(f"Undoing {len(items)} change(s) from {undo_file.path}\n")
+            print(f"Undoing {len(undo_file.items)} change(s) from {undo_file.path}\n")
+            # Entities first, so a reference only goes back to an ID that was given back.
+            steps = undo.plan_undo(entries, undo_file.changes)
+            items = [_Item(step.describe(), step.change) for step in steps]
+            failures = sum(step.change is None for step in steps)
+            references = [r for r in reversed(undo_file.items) if isinstance(r, ReferenceChange)]
         else:
             renames = plan_renames(
                 entries, args.old_id_prefix, args.new_id_prefix, args.entity_name_prefix
@@ -251,8 +257,10 @@ async def run(
             failures = 0
 
         log = None
-        pending = any(i.change is not None and i.change.has_changes for i in items) or any(
-            plan.edits for plan in plans
+        pending = (
+            any(i.change is not None and i.change.has_changes for i in items)
+            or any(plan.edits for plan in plans)
+            or bool(references)
         )
         if pending and not args.dry_run:
             log = UndoLog.create(args.undo_file or default_undo_path(), url)
@@ -268,6 +276,15 @@ async def run(
                     and i.change not in failed
                 }
                 failures += await _update_references(ha, keep_accepted(plans, accepted), log)
+            if references:
+                restored = {
+                    step.recorded.entity_id
+                    for step in steps
+                    if step.change is not None
+                    and step.change.new_entity_id == step.recorded.entity_id
+                    and step.change not in failed
+                }
+                failures += await _undo_references(ha, references, restored, log)
         finally:
             if log is not None:
                 _report_undo_file(log)
@@ -294,23 +311,25 @@ async def _plan_references(
     return plan_references(await targets.load_targets(ha, entries), mapping)
 
 
-async def _plan_undo(
-    ha: client.HomeAssistantClient, entries: list[dict[str, Any]], undo_file: undo.UndoFile
-) -> tuple[list[_Item], int]:
-    """The items reversing ``undo_file``, newest first, and how many must be skipped."""
-    entity_steps = iter(undo.plan_undo(entries, undo_file.changes))
+async def _undo_references(
+    ha: client.HomeAssistantClient,
+    references: list[ReferenceChange],
+    restored: set[str],
+    log: UndoLog | None,
+) -> int:
+    """Print and (unless dry run) reverse recorded reference updates. Returns the failures.
+
+    ``restored`` are the entity IDs given back by this undo; references are only pointed
+    back at those.
+    """
     items = []
     skipped = 0
-    for recorded in reversed(undo_file.items):
-        if isinstance(recorded, Change):
-            step = next(entity_steps)
-            items.append(_Item(step.describe(), step.change))
-        else:
-            current = await targets.fetch(ha, recorded.kind, recorded.key)
-            step = undo.plan_reference_undo(recorded, current)
-            items.append(_Item(step.describe(), step.change, step.config))
+    for recorded in references:
+        current = await targets.fetch(ha, recorded.kind, recorded.key)
+        step = undo.plan_reference_undo(recorded, current, restored)
+        items.append(_Item(step.describe(), step.change, step.config))
         skipped += step.change is None
-    return items, skipped
+    return skipped + len(await _apply(ha, items, log))
 
 
 async def _update_references(

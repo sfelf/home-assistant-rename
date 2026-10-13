@@ -192,6 +192,8 @@ and the old and new ID:
   `{{ states('sensor.skyvane_skyvane_station_backyard_station_temperature') }}`
 - automations, scripts and scenes defined in YAML outside the three files above (for
   example in packages), YAML-mode dashboards and persons defined in YAML
+- references that can't be changed where they are, such as a scene that already has an
+  entry for the new ID
 - groups, including group helpers. Groups are found through the members they report,
   so a group that's already unavailable when you run `ha-rename` (for example because
   none of its members exist) isn't listed.
@@ -233,11 +235,6 @@ ha-rename --undo ha-rename-undo-20261011-224433.jsonl
 ```
 Undoing 5 change(s) from ha-rename-undo-20261011-224433.jsonl
 
-dashboard 'Weather' (weather)
-  views[0].cards[0].entity: sensor.skyvane_station_temperature -> sensor.skyvane_skyvane_station_backyard_station_temperature
-automation 'Heater off' (id 1700000000001)
-  triggers[0].entity_id: sensor.skyvane_station_temperature -> sensor.skyvane_skyvane_station_backyard_station_temperature
-  actions[0].target.entity_id: switch.skyvane_station_heater -> switch.skyvane_skyvane_station_backyard_station_heater
 sensor.skyvane_station_humidity
   -> sensor.skyvane_skyvane_station_backyard_station_humidity
 switch.skyvane_station_heater
@@ -246,6 +243,11 @@ switch.skyvane_station_heater
 sensor.skyvane_station_temperature
   -> sensor.skyvane_skyvane_station_backyard_station_temperature
   name: 'Temperature' -> (integration's name)
+dashboard 'Weather' (weather)
+  views[0].cards[0].entity: sensor.skyvane_station_temperature -> sensor.skyvane_skyvane_station_backyard_station_temperature
+automation 'Heater off' (id 1700000000001)
+  triggers[0].entity_id: sensor.skyvane_station_temperature -> sensor.skyvane_skyvane_station_backyard_station_temperature
+  actions[0].target.entity_id: switch.skyvane_station_heater -> switch.skyvane_skyvane_station_backyard_station_heater
 
 Undo file: ha-rename-undo-20261011-224510.jsonl
 To reverse these changes, run: ha-rename --undo ha-rename-undo-20261011-224510.jsonl
@@ -253,12 +255,15 @@ To reverse these changes, run: ha-rename --undo ha-rename-undo-20261011-224510.j
 Done.
 ```
 
-- Changes are reversed newest first, so references are put back before the entities
-  are renamed back. It connects to the Home Assistant URL recorded in the undo file
-  unless you pass `--ha-url`.
-- A reference is put back only where it still has the new ID. If you've changed it
-  since, your change is kept and the output says so. References added after the run,
-  for example in a new automation, aren't changed.
+- Entities are renamed back first (newest first), then references are put back. It
+  connects to the Home Assistant URL recorded in the undo file unless you pass
+  `--ha-url`.
+- A reference is put back only where it still has the new ID, and only if its entity got
+  its old ID back. If you've changed it since, or another entity has taken the old ID,
+  it's left as is and the output says so. If the target still refers to the new ID
+  somewhere else (for example in an action you've moved since), that's listed too, so
+  you can fix it by hand. References added after the run, for example in a new
+  automation, aren't changed.
 - Names are restored exactly. A name that came from the integration, shown as
   `(integration's name)`, goes back to following the integration rather than being
   fixed to a copy of the old text.

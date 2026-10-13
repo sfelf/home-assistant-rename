@@ -20,6 +20,12 @@ from ha_rename.references import Edit, Target
 REST_KINDS = ("automation", "script", "scene")
 DEFAULT_DASHBOARD = "lovelace"  # the default dashboard's panel URL path
 YAML = "defined in YAML"
+# Error codes Home Assistant uses when the thing asked for doesn't exist.
+MISSING = ("not_found", "config_not_found")
+
+
+def _is_missing(error: CommandError) -> bool:
+    return isinstance(error.error, dict) and error.error.get("code") in MISSING
 
 
 async def load_targets(ha: HomeAssistantClient, entries: list[dict[str, Any]]) -> list[Target]:
@@ -59,7 +65,9 @@ def _rest_path(kind: str, key: str) -> str:
 async def _raw_config(ha: HomeAssistantClient, kind: str, entity_id: str) -> Any:
     try:
         result = await ha.call({"type": f"{kind}/config", "entity_id": entity_id})
-    except CommandError:
+    except CommandError as e:
+        if not _is_missing(e):
+            raise
         return None  # e.g. an automation that failed to load
     return result["config"]
 
@@ -113,7 +121,9 @@ async def _dashboards(ha: HomeAssistantClient) -> list[Target]:
             config = await ha.call(
                 {"type": "lovelace/config", "url_path": _dashboard_url_path(url_path)}
             )
-        except CommandError:
+        except CommandError as e:
+            if not _is_missing(e):
+                raise
             continue  # e.g. the default dashboard before it's been edited: generated
         default = url_path == DEFAULT_DASHBOARD
         title = panel.get("title") or ("Overview" if default else url_path)
@@ -146,7 +156,9 @@ async def _persons(ha: HomeAssistantClient) -> list[Target]:
 async def _energy(ha: HomeAssistantClient) -> list[Target]:
     try:
         prefs = await ha.call({"type": "energy/get_prefs"})
-    except CommandError:
+    except CommandError as e:
+        if not _is_missing(e):
+            raise
         return []  # the energy dashboard hasn't been set up
     return [Target("energy", "energy", "energy settings", prefs)]
 
@@ -161,7 +173,9 @@ async def fetch(ha: HomeAssistantClient, kind: str, key: str) -> Any:
             return await ha.call(payload)
         if kind == "energy":
             return await ha.call({"type": "energy/get_prefs"})
-    except CommandError:
+    except CommandError as e:
+        if not _is_missing(e):
+            raise
         return None
     if kind == "person":
         persons = (await ha.call({"type": "person/list"})).get("storage", [])

@@ -220,13 +220,16 @@ def plan_references(targets: Iterable[Target], renames: dict[str, str]) -> list[
     """Scan each target for the renamed IDs, leaving out targets with no references.
 
     In targets that can't be edited, every reference is reported for a manual fix; in
-    the others, only those inside text are.
+    the others, those inside text are, and so are edits that can't be applied (such as
+    renaming a scene's entity key to one it already has).
     """
     plans = []
     for target in targets:
         edits, hits = scan(target.config, renames)
         if target.editable:
-            plan = TargetPlan(target, tuple(edits), tuple(hits))
+            applied = apply_edits(target.config, edits).applied
+            rejected = [e for e in edits if e not in applied]
+            plan = TargetPlan(target, tuple(applied), (*rejected, *hits))
         else:
             plan = TargetPlan(target, (), (*edits, *hits))
         if plan.edits or plan.manual:

@@ -284,6 +284,16 @@ class TestPlanReferences:
             ("conditions", 0, "value_template"),
         ]
 
+    def test_edits_that_cant_be_applied_need_a_manual_fix(self):
+        # The scene already has the new ID as a key, e.g. a stale entry.
+        config = {"entities": {"light.a_lamp": {"state": "on"}, "light.b_lamp": {}}}
+        target = Target("scene", "1", "scene 'Evening' (id 1)", config)
+        [plan] = plan_references([target], RENAMES)
+        assert plan.edits == ()
+        assert plan.manual == (
+            Edit(("entities", "light.a_lamp"), "light.a_lamp", "light.b_lamp", is_key=True),
+        )
+
     def test_targets_without_references_left_out(self):
         quiet = Target("script", "x", "script 'X' (script.x)", {"sequence": []})
         assert plan_references([quiet], RENAMES) == []

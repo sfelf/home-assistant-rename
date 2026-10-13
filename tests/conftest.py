@@ -126,6 +126,8 @@ class FakeHomeAssistant:
         self.saves: list[tuple[str, str, Any]] = []
         self.fail_saves: set[str] = set()  # keys whose save is rejected
         self.drop_saves: set[str] = set()  # keys whose save closes the connection
+        # Commands that fail, by type, with this error code.
+        self.fail_commands: dict[str, str] = {}
         self._dropping = False
 
     def add_dashboard(self, url_path: str, config: dict[str, Any], mode: str = "storage"):
@@ -170,6 +172,8 @@ class FakeHomeAssistant:
 
     def respond(self, msg: dict[str, Any]) -> dict[str, Any]:
         reply = {"id": msg["id"], "type": "result"}
+        if msg["type"] in self.fail_commands:
+            return self.error(reply, self.fail_commands[msg["type"]], "Something went wrong")
         if msg["type"] == "config/entity_registry/list":
             return {**reply, "success": True, "result": self.entities}
         if msg["type"] == "config/entity_registry/update":

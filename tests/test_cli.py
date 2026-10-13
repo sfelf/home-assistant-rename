@@ -798,6 +798,26 @@ class TestReferences:
         assert fake_ha.saves == []
         assert "References to update" not in capsys.readouterr().out
 
+    def test_conflicting_scene_key_is_not_saved(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        scene = {"id": "1", "entities": {H_OLD: {"state": "on"}, H_NEW: {"state": "off"}}}
+        fake_ha.states = [state("scene.evening", "Evening", id="1")]
+        fake_ha.scenes = {"1": copy.deepcopy(scene)}
+        assert self.run(fake_ha, memory_keyring) == 0
+        assert fake_ha.saves == []
+        assert fake_ha.scenes["1"] == scene
+        out = capsys.readouterr().out
+        assert "References to update" not in out
+        assert f"Needs manual fix (1):\nscene 'Evening' (id 1)\n  entities['{H_OLD}']:" in out
+        [path] = undo_files(in_tmp_dir)
+        assert not any(isinstance(c, undo.ReferenceChange) for c in undo.load(path).items)
+
+    def test_unexpected_read_error_stops_before_renaming(self, fake_ha, memory_keyring, capsys):
+        fake_ha.add_dashboard("weather", {"views": []})
+        fake_ha.fail_commands = {"lovelace/config": "unauthorized"}
+        assert self.run(fake_ha, memory_keyring) == 1
+        assert fake_ha.updates == []
+        assert "unauthorized: Something went wrong" in capsys.readouterr().err
+
     def test_only_manual_fixes(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
         fake_ha.states = [state("automation.garage", "Garage")]
         fake_ha.raw_configs = {"automation.garage": {"triggers": [{"entity_id": T_OLD}]}}
@@ -866,8 +886,8 @@ class TestUndoReferences:
         assert (
             f"automation 'Heater off' (id 17)\n  triggers[0].entity_id[0]: {T_NEW} -> {T_OLD}\n"
         ) in out
-        # References first: they were recorded after the renames.
-        assert out.index("energy settings") < out.index(T_NEW + "\n  -> " + T_OLD)
+        # Entities first, so references only go back to IDs that were given back.
+        assert out.index(T_NEW + "\n  -> " + T_OLD) < out.index("energy settings")
 
     def test_undo_of_undo_redoes_references(self, fake_ha, memory_keyring, in_tmp_dir):
         _, path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
@@ -903,6 +923,34 @@ class TestUndoReferences:
             assert len(fake_ha.saves) == saves
         else:
             assert fake_ha.scripts["morning"]["sequence"][0]["target"]["entity_id"] == H_OLD
+
+    def test_undo_leaves_references_when_old_id_was_taken(
+        self, fake_ha, memory_keyring, in_tmp_dir, capsys
+    ):
+        _, path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        # Since the run, another entity took the heater's old ID.
+        fake_ha.entities.append(entity(H_OLD, original_name="Another", id="reg-another"))
+        assert cli.main(["--undo", str(path)]) == 1
+        automation = fake_ha.automations["17"]
+        assert automation["actions"][0]["target"]["entity_id"] == H_NEW
+        assert automation["triggers"][0]["entity_id"][0] == T_OLD
+        assert fake_ha.scripts["morning"]["sequence"][0]["target"]["entity_id"] == H_NEW
+        out = capsys.readouterr().out
+        assert (
+            f"  actions[0].target.entity_id: {H_OLD} wasn't given back its ID; left as is\n" in out
+        )
+
+    def test_undo_reports_references_moved_since(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        _, path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        actions = fake_ha.automations["17"]["actions"]
+        actions.insert(0, {"action": "switch.turn_on", "target": {"entity_id": H_NEW}})
+        assert cli.main(["--undo", str(path)]) == 0
+        # The action now at the recorded position is put back; the moved one is reported.
+        actions = fake_ha.automations["17"]["actions"]
+        assert actions[0]["target"]["entity_id"] == H_OLD
+        assert actions[1]["target"]["entity_id"] == H_NEW
+        out = capsys.readouterr().out
+        assert f"  actions[1].target.entity_id: still refers to {H_NEW}; left as is\n" in out
 
     def test_undo_only_reverts_recorded_updates(self, fake_ha, memory_keyring, in_tmp_dir):
         _, path = self.apply(fake_ha, memory_keyring, in_tmp_dir)

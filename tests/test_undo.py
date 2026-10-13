@@ -542,6 +542,24 @@ class TestPlanReferenceUndo:
             "  nothing to undo (already as it was before)",
         ]
 
+    def test_only_restored_ids(self):
+        step = plan_reference_undo(REFERENCE, self.AFTER, restored={"sensor.other"})
+        assert step.config == self.AFTER
+        assert not step.change.has_changes
+        assert step.notes == (
+            "triggers[0].entity_id: sensor.old_temp wasn't given back its ID; left as is",
+        )
+
+    def test_restored_id(self):
+        step = plan_reference_undo(REFERENCE, self.AFTER, restored={"sensor.old_temp"})
+        assert step.config["triggers"] == [{"entity_id": "sensor.old_temp"}]
+
+    def test_reports_references_left_behind(self):
+        current = {"triggers": [{"entity_id": "sensor.new_temp"}, {"entity_id": "sensor.new_temp"}]}
+        step = plan_reference_undo(REFERENCE, current)
+        assert step.config["triggers"][0] == {"entity_id": "sensor.old_temp"}
+        assert step.notes == ("triggers[1].entity_id: still refers to sensor.new_temp; left as is",)
+
     def test_removed(self):
         step = plan_reference_undo(REFERENCE, None)
         assert step.change is None

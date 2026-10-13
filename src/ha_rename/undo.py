@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ha_rename import __version__
-from ha_rename.references import Edit, revert_edits
+from ha_rename.references import Edit, format_path, revert_edits, scan
 
 FORMAT = "ha-rename-undo"
 # Version 2 added reference updates; version 1 files only have entity changes.
@@ -396,16 +396,31 @@ class ReferenceUndoStep:
         return [self.recorded.label, *self.change.describe()[1:], *(f"  {n}" for n in self.notes)]
 
 
-def plan_reference_undo(recorded: ReferenceChange, current: Any) -> ReferenceUndoStep:
+def plan_reference_undo(
+    recorded: ReferenceChange, current: Any, restored: set[str] | None = None
+) -> ReferenceUndoStep:
     """Work out how to reverse ``recorded``, given the target's ``current`` config.
 
     Like :func:`plan_undo`, only locations that still hold the recorded new value are put
-    back. ``current`` is None when the target no longer exists.
+    back. ``current`` is None when the target no longer exists. With ``restored`` (the
+    entity IDs that have been given back), a reference is only pointed back at an ID in
+    it, so it never ends up on an entity that took that ID since. Afterwards, any
+    reference to a restored entity's new ID that is still in the target (e.g. in an item
+    moved since) is noted, so it can be fixed by hand.
     """
     if current is None:
         return ReferenceUndoStep(
             recorded, None, notes=("not found in Home Assistant (removed since?)",)
         )
-    result = revert_edits(current, recorded.edits)
+    edits = [e for e in recorded.edits if restored is None or e.old in restored]
+    notes = [
+        f"{format_path(e.path)}: {e.old} wasn't given back its ID; left as is"
+        for e in recorded.edits
+        if e not in edits
+    ]
+    result = revert_edits(current, edits)
+    notes += result.notes
+    leftovers, _ = scan(result.config, {e.new: e.old for e in edits})
+    notes += [f"{format_path(e.path)}: still refers to {e.old}; left as is" for e in leftovers]
     change = ReferenceChange(recorded.kind, recorded.key, recorded.label, tuple(result.applied))
-    return ReferenceUndoStep(recorded, change, result.config, tuple(result.notes))
+    return ReferenceUndoStep(recorded, change, result.config, tuple(notes))
