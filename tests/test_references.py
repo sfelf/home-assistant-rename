@@ -245,6 +245,17 @@ class TestApplyEdits:
         assert reverted.notes == []
         assert reverted.config == config
 
+    def test_chained_nested_keys(self):
+        renames = {"sensor.a": "sensor.aa", "sensor.aa": "sensor.aaa"}
+        config = {"sensor.aa": {"sensor.a": 1}, "sensor.a": {"sensor.aa": 2}}
+        edits, _ = scan(config, renames)
+        result = apply_edits(config, edits)
+        assert result.notes == []
+        assert result.config == {"sensor.aaa": {"sensor.aa": 1}, "sensor.aa": {"sensor.aaa": 2}}
+        reverted = revert_edits(result.config, result.applied)
+        assert reverted.notes == []
+        assert reverted.config == config
+
     def test_swapped_keys_are_left(self):
         renames = {"light.a": "light.b", "light.b": "light.a"}
         config = {"entities": {"light.a": 1, "light.b": 2}}

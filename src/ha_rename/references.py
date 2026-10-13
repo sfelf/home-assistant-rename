@@ -130,39 +130,35 @@ def apply_edits(config: Any, edits: Iterable[Edit], *, keys_first: bool = False)
     """Apply ``edits`` to a copy of ``config``, each only where it still finds ``old``.
 
     Edits whose location no longer holds ``old`` are left out and described in
-    ``notes``. A renamed key keeps its position in its dict. Value paths name keys as
-    they were before any key edit, so values go first, unless ``keys_first`` (when
-    undoing, the keys must be put back before those paths fit again).
+    ``notes``. A renamed key keeps its position in its dict.
+
+    Paths name keys as they were before any key edit. So values go first, then keys
+    deepest first, leaving every parent path as it was; with ``keys_first`` (undoing),
+    keys go shallowest first, restoring each parent path before the keys and values
+    below it.
     """
     result = EditResult(copy.deepcopy(config))
     edits = list(edits)
-    # Paths may name a key either before or after a key edit in the same batch.
-    aliases: dict[str, str] = {}
-    for edit in edits:
-        if edit.is_key:
-            aliases[edit.old] = edit.new
-            aliases[edit.new] = edit.old
 
     def node_at(path: Path) -> Any:
         """The value at ``path``, or ``_MISSING``."""
         node = result.config
         for element in path:
-            element = _resolve(node, element, aliases)
-            if element is None:
+            if not _has(node, element):
                 return _MISSING
             node = node[element]
         return node
 
     def apply_value(edit: Edit) -> None:
         container = node_at(edit.path[:-1]) if edit.path else _MISSING
-        element = _resolve(container, edit.path[-1], aliases) if edit.path else None
-        if element is not None and container[element] == edit.old:
-            container[element] = edit.new
+        found = bool(edit.path) and _has(container, edit.path[-1])
+        if found and container[edit.path[-1]] == edit.old:
+            container[edit.path[-1]] = edit.new
             result.applied.append(edit)
             return
         state = "no longer there"
-        if element is not None:
-            state = f"changed since to {container[element]!r}"
+        if found:
+            state = f"changed since to {container[edit.path[-1]]!r}"
         result.notes.append(f"{format_path(edit.path)}: {state}; left as is")
 
     def apply_key(edit: Edit) -> bool:
@@ -175,25 +171,27 @@ def apply_edits(config: Any, edits: Iterable[Edit], *, keys_first: bool = False)
         result.applied.append(edit)
         return True
 
-    if not keys_first:
-        for edit in edits:
-            if not edit.is_key:
-                apply_value(edit)
-    # Deepest keys first, so the paths of shallower ones still resolve. Keys are retried
-    # while any applies, since one may free the key another is renamed to (a -> aa when
-    # aa -> aaa), in whichever order they come.
-    pending = sorted((e for e in edits if e.is_key), key=lambda e: len(e.path), reverse=True)
-    while pending:
-        remaining = [edit for edit in pending if not apply_key(edit)]
-        if len(remaining) == len(pending):
-            break
-        pending = remaining
-    for edit in pending:
-        result.notes.append(f"{format_path(edit.path)}: changed since; left as is")
+    def apply_keys() -> None:
+        depths = sorted({len(e.path) for e in edits if e.is_key}, reverse=not keys_first)
+        for depth in depths:
+            # Retried while any applies: one may free the key another is renamed to
+            # (a -> aa while aa -> aaa), in whichever order they come.
+            pending = [e for e in edits if e.is_key and len(e.path) == depth]
+            while pending:
+                remaining = [edit for edit in pending if not apply_key(edit)]
+                if len(remaining) == len(pending):
+                    break
+                pending = remaining
+            for edit in pending:
+                result.notes.append(f"{format_path(edit.path)}: changed since; left as is")
+
     if keys_first:
-        for edit in edits:
-            if not edit.is_key:
-                apply_value(edit)
+        apply_keys()
+    for edit in edits:
+        if not edit.is_key:
+            apply_value(edit)
+    if not keys_first:
+        apply_keys()
     return result
 
 
@@ -202,15 +200,10 @@ def revert_edits(config: Any, edits: Iterable[Edit]) -> EditResult:
     return apply_edits(config, [e.reversed() for e in edits], keys_first=True)
 
 
-def _resolve(node: Any, element: str | int, aliases: dict[str, str]) -> str | int | None:
-    if isinstance(node, dict) and isinstance(element, str):
-        if element in node:
-            return element
-        alias = aliases.get(element)
-        return alias if alias in node else None
-    if isinstance(node, list) and isinstance(element, int) and 0 <= element < len(node):
-        return element
-    return None
+def _has(node: Any, element: str | int) -> bool:
+    if isinstance(node, dict):
+        return element in node
+    return isinstance(node, list) and isinstance(element, int) and 0 <= element < len(node)
 
 
 @dataclass(frozen=True)

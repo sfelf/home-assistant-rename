@@ -237,14 +237,19 @@ async def run(
 
         plans: list[TargetPlan] = []
         steps: list[undo.UndoStep] = []
-        references: list[ReferenceChange] = []
+        references: list[tuple[ReferenceChange, Any]] = []
         if undo_file is not None:
             print(f"Undoing {len(undo_file.items)} change(s) from {undo_file.path}\n")
             # Entities first, so a reference only goes back to an ID that was given back.
             steps = undo.plan_undo(entries, undo_file.changes)
             items = [_Item(step.describe(), step.change) for step in steps]
             failures = sum(step.change is None for step in steps)
-            references = [r for r in reversed(undo_file.items) if isinstance(r, ReferenceChange)]
+            # Read every target now, so a read error stops the undo before any change.
+            references = [
+                (r, await targets.fetch(ha, r.kind, r.key))
+                for r in reversed(undo_file.items)
+                if isinstance(r, ReferenceChange)
+            ]
         else:
             renames = plan_renames(
                 entries, args.old_id_prefix, args.new_id_prefix, args.entity_name_prefix
@@ -313,19 +318,19 @@ async def _plan_references(
 
 async def _undo_references(
     ha: client.HomeAssistantClient,
-    references: list[ReferenceChange],
+    references: list[tuple[ReferenceChange, Any]],
     restored: set[str],
     log: UndoLog | None,
 ) -> int:
     """Print and (unless dry run) reverse recorded reference updates. Returns the failures.
 
-    ``restored`` are the entity IDs given back by this undo; references are only pointed
-    back at those.
+    ``references`` pairs each recorded update with its target's config, read before the
+    entities were renamed back. ``restored`` are the entity IDs given back by this undo;
+    references are only pointed back at those.
     """
     items = []
     skipped = 0
-    for recorded in references:
-        current = await targets.fetch(ha, recorded.kind, recorded.key)
+    for recorded, current in references:
         step = undo.plan_reference_undo(recorded, current, restored)
         items.append(_Item(step.describe(), step.change, step.config))
         skipped += step.change is None

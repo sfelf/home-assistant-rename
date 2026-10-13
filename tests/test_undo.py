@@ -561,6 +561,27 @@ class TestPlanReferenceUndo:
         assert step.config["triggers"][0] == {"entity_id": "sensor.old_temp"}
         assert step.notes == ("triggers[1].entity_id: still refers to sensor.new_temp; left as is",)
 
+    def test_restored_ids_are_not_leftovers(self):
+        # sensor.a -> sensor.aa while sensor.aa -> sensor.aaa: after undo, sensor.aa is
+        # the second entity's own ID again, not a leftover of the first.
+        chain = ReferenceChange(
+            "automation",
+            "17",
+            "automation 'Chain' (id 17)",
+            (
+                Edit(("entity_id", 0), "sensor.a", "sensor.aa"),
+                Edit(("entity_id", 1), "sensor.aa", "sensor.aaa"),
+            ),
+        )
+        step = plan_reference_undo(chain, {"entity_id": ["sensor.aa", "sensor.aaa"]})
+        assert step.config == {"entity_id": ["sensor.a", "sensor.aa"]}
+        assert step.notes == ()
+        restored = {"sensor.a", "sensor.aa"}
+        assert (
+            plan_reference_undo(chain, {"entity_id": ["sensor.aa", "sensor.aaa"]}, restored).notes
+            == ()
+        )
+
     def test_removed(self):
         step = plan_reference_undo(REFERENCE, None)
         assert step.change is None

@@ -424,7 +424,10 @@ def plan_reference_undo(
     ]
     result = revert_edits(current, edits)
     notes += result.notes
-    leftovers, _ = scan(result.config, {e.new: e.old for e in edits})
+    # An ID given back to its own entity is valid wherever it is, even if it's also
+    # another entity's new ID (a -> aa while aa -> aaa).
+    valid = {e.old for e in edits} if restored is None else restored
+    leftovers, _ = scan(result.config, {e.new: e.old for e in edits if e.new not in valid})
     notes += [f"{format_path(e.path)}: still refers to {e.old}; left as is" for e in leftovers]
     change = ReferenceChange(recorded.kind, recorded.key, recorded.label, tuple(result.applied))
     return ReferenceUndoStep(recorded, change, result.config, tuple(notes))

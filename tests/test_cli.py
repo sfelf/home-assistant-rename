@@ -952,6 +952,16 @@ class TestUndoReferences:
         out = capsys.readouterr().out
         assert f"  actions[1].target.entity_id: still refers to {H_NEW}; left as is\n" in out
 
+    def test_undo_read_error_changes_nothing(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        _, path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        renamed = copy.deepcopy(fake_ha.entities)
+        updates, saves = len(fake_ha.updates), len(fake_ha.saves)
+        fake_ha.fail_commands = {"lovelace/config": "unauthorized"}
+        assert cli.main(["--undo", str(path)]) == 1
+        assert fake_ha.entities == renamed
+        assert (len(fake_ha.updates), len(fake_ha.saves)) == (updates, saves)
+        assert "unauthorized: Something went wrong" in capsys.readouterr().err
+
     def test_undo_only_reverts_recorded_updates(self, fake_ha, memory_keyring, in_tmp_dir):
         _, path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
         fake_ha.automations["19"] = {"id": "19", "triggers": [{"entity_id": T_NEW}]}
