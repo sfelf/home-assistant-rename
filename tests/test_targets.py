@@ -326,3 +326,47 @@ def test_unexpected_fetch_errors_are_raised(fake_ha, kind, command):
     fake_ha.fail_commands = {command: "home_assistant_error"}
     with pytest.raises(client.CommandError, match="home_assistant_error"):
         run(fake_ha, lambda ha: targets.fetch(ha, kind, "x"))
+
+
+class TestWithoutState:
+    """Automations, scripts and scenes disabled in the entity registry have no state."""
+
+    def test_found_through_the_registry(self, fake_ha):
+        fake_ha.automations = {"17": HEATER_OFF}
+        fake_ha.scripts = {"morning": {"sequence": []}}
+        fake_ha.scenes = {"1": {"id": "1", "entities": {}}}
+        entries = [
+            entity("automation.heater_off", "Heater off", platform="automation", unique_id="17"),
+            entity(
+                "script.good_morning",
+                original_name="Morning",
+                platform="script",
+                unique_id="morning",
+            ),
+            entity("scene.evening", platform="scene", unique_id="1"),
+        ]
+        assert load(fake_ha, entries) == [
+            Target("automation", "17", "automation 'Heater off' (id 17)", HEATER_OFF),
+            Target("script", "morning", "script 'Morning' (script.good_morning)", {"sequence": []}),
+            Target("scene", "1", "scene 'scene.evening' (id 1)", {"id": "1", "entities": {}}),
+        ]
+
+    def test_entities_with_a_state_are_not_loaded_twice(self, fake_ha):
+        fake_ha.states = [state("automation.heater_off", "Heater off", id="17")]
+        fake_ha.automations = {"17": HEATER_OFF}
+        entries = [entity("automation.heater_off", platform="automation", unique_id="17")]
+        assert len(load(fake_ha, entries)) == 1
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            entity("automation.from_yaml", platform="automation", unique_id="not-in-the-file"),
+            entity("automation.no_key", platform="automation"),
+            entity("light.kitchen", platform="hue", unique_id="17"),
+            entity("scene.other_platform", platform="hue", unique_id="17"),
+        ],
+    )
+    def test_others_are_left_out(self, fake_ha, entry):
+        fake_ha.automations = {"17": HEATER_OFF}
+        fake_ha.scenes = {"17": {"id": "17"}}
+        assert load(fake_ha, [entry]) == []

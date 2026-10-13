@@ -37,7 +37,8 @@ async def load_targets(ha: HomeAssistantClient, entries: list[dict[str, Any]]) -
         if e.get("platform") == "script" and e.get("unique_id")
     }
     targets: list[Target | None] = []
-    for state in await ha.call({"type": "get_states"}):
+    states = await ha.call({"type": "get_states"})
+    for state in states:
         entity_id = state["entity_id"]
         domain, object_id = entity_id.split(".", 1)
         attributes = state.get("attributes") or {}
@@ -52,6 +53,11 @@ async def load_targets(ha: HomeAssistantClient, entries: list[dict[str, Any]]) -
         elif isinstance(attributes.get("entity_id"), list):
             config = {"entity_id": attributes["entity_id"]}
             targets.append(Target("group", None, f"group {name!r} ({entity_id})", config, False))
+    # Entities disabled in the registry have no state, but their config still counts.
+    with_state = {state["entity_id"] for state in states}
+    for entry in entries:
+        if entry["entity_id"] not in with_state:
+            targets.append(await _without_state(ha, entry))
     targets += await _dashboards(ha)
     targets += await _persons(ha)
     targets += await _energy(ha)
@@ -105,6 +111,24 @@ async def _scene(ha: HomeAssistantClient, name: str, attributes: dict[str, Any])
     # A YAML scene: its state lists the entities it sets.
     config = {"entity_id": attributes.get("entity_id") or []}
     return Target("scene", None, f"scene {name!r} ({YAML})", config, False)
+
+
+async def _without_state(ha: HomeAssistantClient, entry: dict[str, Any]) -> Target | None:
+    """A UI-managed automation, script or scene known only from its registry entry.
+
+    Its registry unique_id is its key in the UI-managed file. One defined elsewhere in
+    YAML can't be read without a state, so it's left out.
+    """
+    kind = entry["entity_id"].split(".", 1)[0]
+    key = entry.get("unique_id")
+    if kind not in REST_KINDS or entry.get("platform") != kind or not key:
+        return None
+    config = await ha.rest("GET", _rest_path(kind, key))
+    if config is None:
+        return None
+    name = entry.get("name") or entry.get("original_name") or entry["entity_id"]
+    where = entry["entity_id"] if kind == "script" else f"id {key}"
+    return Target(kind, key, f"{kind} {name!r} ({where})", config)
 
 
 def _dashboard_url_path(key: str) -> str | None:

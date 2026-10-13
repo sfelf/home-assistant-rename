@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ha_rename import __version__
-from ha_rename.references import Edit, format_path, revert_edits, scan
+from ha_rename.references import EDITABLE_KINDS, Edit, format_path, revert_edits, scan
 
 FORMAT = "ha-rename-undo"
 # Version 2 added reference updates; version 1 files only have entity changes.
@@ -242,7 +242,11 @@ def _edit_from_json(data: Any) -> Edit:
 
 def _reference_from_json(data: Any) -> ReferenceChange:
     fields = [data["kind"], data["key"], data["label"]]
-    if not all(_is_str(v) for v in fields) or not isinstance(data["edits"], list):
+    if (
+        not all(_is_str(v) for v in fields)
+        or data["kind"] not in EDITABLE_KINDS
+        or not isinstance(data["edits"], list)
+    ):
         raise ValueError(f"invalid reference {data!r}")
     return ReferenceChange(*fields, tuple(_edit_from_json(e) for e in data["edits"]))
 

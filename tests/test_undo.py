@@ -450,6 +450,7 @@ class TestReferenceRecords:
         "reference, message",
         [
             ({**REFERENCE_JSON, "kind": 5}, "invalid reference"),
+            ({**REFERENCE_JSON, "kind": "group"}, "invalid reference"),
             ({**REFERENCE_JSON, "key": None}, "invalid reference"),
             ({**REFERENCE_JSON, "edits": "nope"}, "invalid reference"),
             (

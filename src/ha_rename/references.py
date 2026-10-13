@@ -22,6 +22,9 @@ Path = tuple[str | int, ...]
 # not an entity, so an exact match there is not a reference.
 _ACTION_KEYS = frozenset({"action", "service"})
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_MISSING = object()
+# The kinds of target that can be edited, and so appear in undo files.
+EDITABLE_KINDS = frozenset({"automation", "script", "scene", "dashboard", "person", "energy"})
 
 
 @dataclass(frozen=True)
@@ -138,40 +141,52 @@ def apply_edits(config: Any, edits: Iterable[Edit]) -> EditResult:
             aliases[edit.old] = edit.new
             aliases[edit.new] = edit.old
 
-    def locate(path: Path) -> tuple[Any, str | int] | None:
-        """The container holding the last element of ``path``, and that element."""
+    def node_at(path: Path) -> Any:
+        """The value at ``path``, or ``_MISSING``."""
         node = result.config
-        for i, element in enumerate(path):
+        for element in path:
             element = _resolve(node, element, aliases)
             if element is None:
-                return None
-            if i == len(path) - 1:
-                return node, element
+                return _MISSING
             node = node[element]
-        return None  # an empty path: the whole config is never a single reference
+        return node
 
-    value_edits = [e for e in edits if not e.is_key]
-    # Deepest keys first, so the paths of shallower ones still resolve.
-    key_edits = sorted((e for e in edits if e.is_key), key=lambda e: len(e.path), reverse=True)
-    for edit in [*value_edits, *key_edits]:
-        found = locate(edit.path)
-        if edit.is_key:
-            parent = found[0] if found else None
-            if isinstance(parent, dict) and edit.old in parent and edit.new not in parent:
-                items = [(edit.new if k == edit.old else k, v) for k, v in parent.items()]
-                parent.clear()
-                parent.update(items)
-                result.applied.append(edit)
-            else:
-                result.notes.append(f"{format_path(edit.path)}: changed since; left as is")
-        elif found is not None and found[0][found[1]] == edit.old:
-            found[0][found[1]] = edit.new
+    def apply_value(edit: Edit) -> None:
+        container = node_at(edit.path[:-1]) if edit.path else _MISSING
+        element = _resolve(container, edit.path[-1], aliases) if edit.path else None
+        if element is not None and container[element] == edit.old:
+            container[element] = edit.new
             result.applied.append(edit)
-        else:
-            state = "no longer there"
-            if found is not None:
-                state = f"changed since to {found[0][found[1]]!r}"
-            result.notes.append(f"{format_path(edit.path)}: {state}; left as is")
+            return
+        state = "no longer there"
+        if element is not None:
+            state = f"changed since to {container[element]!r}"
+        result.notes.append(f"{format_path(edit.path)}: {state}; left as is")
+
+    def apply_key(edit: Edit) -> bool:
+        parent = node_at(edit.path[:-1])
+        if not (isinstance(parent, dict) and edit.old in parent and edit.new not in parent):
+            return False
+        items = [(edit.new if k == edit.old else k, v) for k, v in parent.items()]
+        parent.clear()
+        parent.update(items)
+        result.applied.append(edit)
+        return True
+
+    for edit in edits:
+        if not edit.is_key:
+            apply_value(edit)
+    # Deepest keys first, so the paths of shallower ones still resolve. Keys are retried
+    # while any applies, since one may free the key another is renamed to (a -> aa when
+    # aa -> aaa), in whichever order they come.
+    pending = sorted((e for e in edits if e.is_key), key=lambda e: len(e.path), reverse=True)
+    while pending:
+        remaining = [edit for edit in pending if not apply_key(edit)]
+        if len(remaining) == len(pending):
+            break
+        pending = remaining
+    for edit in pending:
+        result.notes.append(f"{format_path(edit.path)}: changed since; left as is")
     return result
 
 

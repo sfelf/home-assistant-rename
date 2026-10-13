@@ -217,6 +217,28 @@ class TestApplyEdits:
         assert result.config == {"entities": entities}
         assert result.notes == ["entities['light.a_lamp']: changed since; left as is"]
 
+    @pytest.mark.parametrize("first", ["sensor.a", "sensor.aa"])
+    def test_chained_keys(self, first):
+        # sensor.a -> sensor.aa while sensor.aa -> sensor.aaa, in either order.
+        renames = {"sensor.a": "sensor.aa", "sensor.aa": "sensor.aaa"}
+        second = "sensor.aa" if first == "sensor.a" else "sensor.a"
+        config = {"entities": {first: {"n": 1}, second: {"n": 2}}}
+        edits, _ = scan(config, renames)
+        result = apply_edits(config, edits)
+        assert result.notes == []
+        assert result.config == {"entities": {renames[first]: {"n": 1}, renames[second]: {"n": 2}}}
+        reverted = revert_edits(result.config, result.applied)
+        assert reverted.notes == []
+        assert reverted.config == config
+
+    def test_swapped_keys_are_left(self):
+        renames = {"light.a": "light.b", "light.b": "light.a"}
+        config = {"entities": {"light.a": 1, "light.b": 2}}
+        edits, _ = scan(config, renames)
+        result = apply_edits(config, edits)
+        assert result.config == config
+        assert len(result.notes) == 2
+
     def test_key_parent_gone(self):
         edit = Edit(("entities", "light.a_lamp"), "light.a_lamp", "light.b_lamp", is_key=True)
         result = apply_edits({}, [edit])
