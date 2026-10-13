@@ -8,9 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from ha_rename import __version__
+from ha_rename.references import Edit, revert_edits
 
 FORMAT = "ha-rename-undo"
-FORMAT_VERSION = 1
+# Version 2 added reference updates; version 1 files only have entity changes.
+FORMAT_VERSION = 2
+READABLE_VERSIONS = (1, 2)
 
 
 class UndoFileError(Exception):
@@ -35,6 +38,10 @@ class Change:
     name: str | None
     new_name: str | None
     registry_id: str | None = None
+
+    @property
+    def subject(self) -> str:
+        return self.entity_id
 
     @property
     def renames_entity(self) -> bool:
@@ -70,26 +77,67 @@ class Change:
         return lines
 
 
+@dataclass(frozen=True)
+class ReferenceChange:
+    """Edits to the references in one target (an automation, a dashboard...).
+
+    ``kind`` and ``key`` identify the target, as in :class:`ha_rename.references.Target`,
+    and ``label`` describes it for the user.
+    """
+
+    kind: str
+    key: str
+    label: str
+    edits: tuple[Edit, ...]
+
+    @property
+    def subject(self) -> str:
+        return self.label
+
+    @property
+    def has_changes(self) -> bool:
+        return bool(self.edits)
+
+    def describe(self) -> list[str]:
+        return [self.label, *(f"  {edit.describe()}" for edit in self.edits)]
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "key": self.key,
+            "label": self.label,
+            "edits": [
+                {"path": list(e.path), "old": e.old, "new": e.new, "is_key": e.is_key}
+                for e in self.edits
+            ],
+        }
+
+
+Recorded = Change | ReferenceChange
+
+
 class UndoLog:
     """An undo file: a journal of every change sent to Home Assistant.
 
     The file is JSON Lines: a header line, then one line per change, appended *before*
-    the change is sent. If Home Assistant rejects a change, a ``{"rejected": n}`` line
-    marks the n-th change as not applied. Each change costs one appended line, however
-    many came before it, and a change whose reply is lost (e.g. the connection drops)
-    is still in the file. :func:`plan_undo` checks the registry, so a change that was
-    recorded but never applied is simply left alone.
+    the change is sent: ``{"change": ...}`` for an entity, ``{"reference": ...}`` for
+    the references in a target. If Home Assistant rejects a change, a
+    ``{"rejected": n}`` line marks the n-th recorded change (of either kind) as not
+    applied. Each change costs one appended line, however many came before it, and a
+    change whose reply is lost (e.g. the connection drops) is still in the file.
+    :func:`plan_undo` and :func:`plan_reference_undo` check the current state, so a
+    change that was recorded but never applied is simply left alone.
     """
 
     def __init__(self, path: Path, url: str):
         self.path = path
         self.url = url
         self.created_at = datetime.now(UTC).isoformat(timespec="seconds")
-        self._recorded: list[Change] = []
+        self._recorded: list[Recorded] = []
         self._rejected: set[int] = set()
 
     @property
-    def changes(self) -> list[Change]:
+    def changes(self) -> list[Recorded]:
         """The recorded changes Home Assistant didn't reject."""
         return [c for i, c in enumerate(self._recorded) if i not in self._rejected]
 
@@ -111,19 +159,21 @@ class UndoLog:
             raise UndoFileError(f"could not create undo file {path}: {e.strerror or e}") from e
         return log
 
-    def record(self, change: Change) -> None:
+    def record(self, change: Recorded) -> None:
         """Record ``change`` before it is sent."""
-        self._append({"change": asdict(change)}, f"Stopped before changing {change.entity_id}")
+        if isinstance(change, Change):
+            item = {"change": asdict(change)}
+        else:
+            item = {"reference": change.to_json()}
+        self._append(item, f"Stopped before changing {change.subject}")
         self._recorded.append(change)
 
-    def forget(self, change: Change) -> None:
+    def forget(self, change: Recorded) -> None:
         """Mark ``change`` as rejected by Home Assistant."""
         index = max(
             i for i, c in enumerate(self._recorded) if c == change and i not in self._rejected
         )
-        self._append(
-            {"rejected": index}, f"It still lists {change.entity_id}, which wasn't changed"
-        )
+        self._append({"rejected": index}, f"It still lists {change.subject}, which wasn't changed")
         self._rejected.add(index)
 
     def _append(self, item: dict[str, Any], consequence: str) -> None:
@@ -151,7 +201,12 @@ class UndoFile:
     path: Path
     ha_url: str
     created_at: str
-    changes: list[Change]
+    items: list[Recorded]
+
+    @property
+    def changes(self) -> list[Change]:
+        """Just the entity changes."""
+        return [item for item in self.items if isinstance(item, Change)]
 
 
 def _change_from_json(data: Any) -> Change:
@@ -164,6 +219,34 @@ def _change_from_json(data: Any) -> Change:
     return Change(*ids, *optional)
 
 
+def _is_str(value: Any) -> bool:
+    return isinstance(value, str)
+
+
+def _is_path_element(value: Any) -> bool:
+    return _is_str(value) or (isinstance(value, int) and not isinstance(value, bool))
+
+
+def _edit_from_json(data: Any) -> Edit:
+    path, old, new, is_key = data["path"], data["old"], data["new"], data["is_key"]
+    if not (
+        isinstance(path, list)
+        and all(_is_path_element(p) for p in path)
+        and _is_str(old)
+        and _is_str(new)
+        and isinstance(is_key, bool)
+    ):
+        raise ValueError(f"invalid edit {data!r}")
+    return Edit(tuple(path), old, new, is_key)
+
+
+def _reference_from_json(data: Any) -> ReferenceChange:
+    fields = [data["kind"], data["key"], data["label"]]
+    if not all(_is_str(v) for v in fields) or not isinstance(data["edits"], list):
+        raise ValueError(f"invalid reference {data!r}")
+    return ReferenceChange(*fields, tuple(_edit_from_json(e) for e in data["edits"]))
+
+
 def _is_index(value: Any, length: int) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and 0 <= value < length
 
@@ -172,7 +255,7 @@ def _parse_header(line: str) -> dict[str, Any]:
     header = json.loads(line)
     if not isinstance(header, dict) or header.get("format") != FORMAT:
         raise ValueError("not an ha-rename undo file")
-    if header.get("version") != FORMAT_VERSION:
+    if header.get("version") not in READABLE_VERSIONS:
         raise ValueError(f"unsupported version {header.get('version')!r}")
     if not isinstance(header.get("ha_url"), str):
         raise ValueError("missing or invalid ha_url")
@@ -197,7 +280,7 @@ def load(path: Path) -> UndoFile:
     except ValueError as e:
         raise UndoFileError(f"{path} is not a valid undo file: {e}") from e
 
-    recorded: list[Change] = []
+    recorded: list[Recorded] = []
     rejected: set[int] = set()
     for n, line in numbered[1:]:
         try:
@@ -212,6 +295,8 @@ def load(path: Path) -> UndoFile:
         try:
             if isinstance(item, dict) and "change" in item:
                 recorded.append(_change_from_json(item["change"]))
+            elif isinstance(item, dict) and "reference" in item:
+                recorded.append(_reference_from_json(item["reference"]))
             elif isinstance(item, dict) and _is_index(item.get("rejected"), len(recorded)):
                 rejected.add(item["rejected"])
             else:
@@ -225,7 +310,7 @@ def load(path: Path) -> UndoFile:
         path=path,
         ha_url=header["ha_url"],
         created_at=str(header.get("created_at", "")),
-        changes=[c for i, c in enumerate(recorded) if i not in rejected],
+        items=[c for i, c in enumerate(recorded) if i not in rejected],
     )
 
 
@@ -287,3 +372,40 @@ def plan_undo(entries: list[dict[str, Any]], changes: list[Change]) -> list[Undo
         change = Change(current_id, restored_id, current_name, restored_name, entry.get("id"))
         steps.append(UndoStep(recorded, change, tuple(notes)))
     return steps
+
+
+@dataclass(frozen=True)
+class ReferenceUndoStep:
+    """How to reverse the edits recorded for one target, given its current config.
+
+    ``change`` holds the edits that put the old values back (so it can itself be
+    recorded and undone), and ``config`` the config to save; ``change`` is None when
+    the target can't be found.
+    """
+
+    recorded: ReferenceChange
+    change: ReferenceChange | None
+    config: Any = None
+    notes: tuple[str, ...] = ()
+
+    def describe(self) -> list[str]:
+        if self.change is None:
+            return [self.recorded.label, *(f"  SKIPPED: {n}" for n in self.notes)]
+        if not self.change.has_changes and not self.notes:
+            return [self.recorded.label, "  nothing to undo (already as it was before)"]
+        return [self.recorded.label, *self.change.describe()[1:], *(f"  {n}" for n in self.notes)]
+
+
+def plan_reference_undo(recorded: ReferenceChange, current: Any) -> ReferenceUndoStep:
+    """Work out how to reverse ``recorded``, given the target's ``current`` config.
+
+    Like :func:`plan_undo`, only locations that still hold the recorded new value are put
+    back. ``current`` is None when the target no longer exists.
+    """
+    if current is None:
+        return ReferenceUndoStep(
+            recorded, None, notes=("not found in Home Assistant (removed since?)",)
+        )
+    result = revert_edits(current, recorded.edits)
+    change = ReferenceChange(recorded.kind, recorded.key, recorded.label, tuple(result.applied))
+    return ReferenceUndoStep(recorded, change, result.config, tuple(result.notes))

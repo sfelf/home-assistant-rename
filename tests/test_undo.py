@@ -4,7 +4,16 @@ from dataclasses import asdict
 import pytest
 
 from ha_rename import __version__, undo
-from ha_rename.undo import Change, UndoLog, UndoStep, load, plan_undo
+from ha_rename.references import Edit
+from ha_rename.undo import (
+    Change,
+    ReferenceChange,
+    UndoLog,
+    UndoStep,
+    load,
+    plan_reference_undo,
+    plan_undo,
+)
 from tests.conftest import entity
 
 URL = "ws://ha.test/api/websocket"
@@ -76,7 +85,7 @@ class TestUndoLog:
         assert lines(path) == [
             {
                 "format": "ha-rename-undo",
-                "version": 1,
+                "version": 2,
                 "created_by": f"ha-rename {__version__}",
                 "created_at": log.created_at,
                 "ha_url": URL,
@@ -229,7 +238,7 @@ class TestLoad:
             ("{not json", "not a valid undo file"),
             ("[]", "not an ha-rename undo file"),
             ('{"format": "other"}', "not an ha-rename undo file"),
-            ('{"format": "ha-rename-undo", "version": 2}', "unsupported version 2"),
+            ('{"format": "ha-rename-undo", "version": 3}', "unsupported version 3"),
             ('{"format": "ha-rename-undo", "version": 1}', "missing or invalid ha_url"),
             ('{"format": "ha-rename-undo", "version": 1, "ha_url": 5}', "invalid ha_url"),
         ],
@@ -341,3 +350,202 @@ class TestPlanUndo:
             "sensor.new", "sensor.old", "Edited", "Edited", "reg-sensor.new"
         )
         assert step.notes == ()
+
+
+EDIT = Edit(("triggers", 0, "entity_id"), "sensor.old_temp", "sensor.new_temp")
+KEY_EDIT = Edit(("entities", "light.old"), "light.old", "light.new", is_key=True)
+REFERENCE = ReferenceChange("automation", "17", "automation 'Heater off' (id 17)", (EDIT,))
+REFERENCE_JSON = {
+    "kind": "automation",
+    "key": "17",
+    "label": "automation 'Heater off' (id 17)",
+    "edits": [
+        {
+            "path": ["triggers", 0, "entity_id"],
+            "old": "sensor.old_temp",
+            "new": "sensor.new_temp",
+            "is_key": False,
+        }
+    ],
+}
+
+
+class TestReferenceChange:
+    def test_describe(self):
+        change = ReferenceChange("scene", "1", "scene 'Evening' (id 1)", (EDIT, KEY_EDIT))
+        assert change.describe() == [
+            "scene 'Evening' (id 1)",
+            "  triggers[0].entity_id: sensor.old_temp -> sensor.new_temp",
+            "  entities['light.old']: light.old -> light.new",
+        ]
+
+    def test_has_changes(self):
+        assert REFERENCE.has_changes
+        assert not ReferenceChange("automation", "17", "x", ()).has_changes
+
+    def test_subject(self):
+        assert REFERENCE.subject == "automation 'Heater off' (id 17)"
+        assert RENAME.subject == "sensor.old_temp"
+
+
+class TestReferenceRecords:
+    def test_record_and_load(self, tmp_path):
+        path = tmp_path / "undo.jsonl"
+        log = UndoLog.create(path, URL)
+        key_change = ReferenceChange("scene", "1", "scene 'Evening' (id 1)", (KEY_EDIT,))
+        log.record(RENAME)
+        log.record(REFERENCE)
+        log.record(key_change)
+        assert lines(path)[2] == {"reference": REFERENCE_JSON}
+        assert log.changes == [RENAME, REFERENCE, key_change]
+        loaded = load(path)
+        assert loaded.items == [RENAME, REFERENCE, key_change]
+        assert loaded.changes == [RENAME]
+
+    def test_rejected_counts_both_kinds(self, tmp_path):
+        path = tmp_path / "undo.jsonl"
+        log = UndoLog.create(path, URL)
+        log.record(RENAME)
+        log.record(REFERENCE)
+        log.forget(REFERENCE)
+        assert lines(path)[3] == {"rejected": 1}
+        assert log.changes == [RENAME]
+        assert load(path).items == [RENAME]
+
+    def test_only_references_keep_the_file(self, tmp_path):
+        path = tmp_path / "undo.jsonl"
+        log = UndoLog.create(path, URL)
+        log.record(REFERENCE)
+        assert not log.discard_if_empty()
+        assert path.exists()
+
+    def test_write_failure_names_the_target(self, tmp_path):
+        path = tmp_path / "undo.jsonl"
+        log = UndoLog.create(path, URL)
+        path.unlink()
+        with pytest.raises(
+            undo.UndoFileError, match="Stopped before changing automation 'Heater off'"
+        ):
+            log.record(REFERENCE)
+
+    def test_version_1_file(self, tmp_path):
+        # Written by v0.2.0: entity changes only.
+        path = tmp_path / "undo.jsonl"
+        path.write_text(
+            json.dumps({**HEADER, "created_by": "ha-rename 0.2.0", "created_at": "2026-10-11"})
+            + "\n"
+            + json.dumps({"change": RENAME_JSON})
+            + "\n"
+        )
+        loaded = load(path)
+        assert loaded.items == loaded.changes == [RENAME]
+
+    def test_half_written_reference_is_ignored(self, tmp_path):
+        path = tmp_path / "undo.jsonl"
+        raw = json.dumps(HEADER) + "\n" + json.dumps({"change": CHANGE}) + '\n{"reference": {"ki'
+        path.write_text(raw)
+        assert len(load(path).items) == 1
+
+    @pytest.mark.parametrize(
+        "reference, message",
+        [
+            ({**REFERENCE_JSON, "kind": 5}, "invalid reference"),
+            ({**REFERENCE_JSON, "key": None}, "invalid reference"),
+            ({**REFERENCE_JSON, "edits": "nope"}, "invalid reference"),
+            (
+                {
+                    **REFERENCE_JSON,
+                    "edits": [{"path": "x", "old": "a", "new": "b", "is_key": False}],
+                },
+                "invalid edit",
+            ),
+            (
+                {
+                    **REFERENCE_JSON,
+                    "edits": [{"path": [True], "old": "a", "new": "b", "is_key": False}],
+                },
+                "invalid edit",
+            ),
+            (
+                {**REFERENCE_JSON, "edits": [{"path": [], "old": 1, "new": "b", "is_key": False}]},
+                "invalid edit",
+            ),
+            (
+                {
+                    **REFERENCE_JSON,
+                    "edits": [{"path": [], "old": "a", "new": None, "is_key": False}],
+                },
+                "invalid edit",
+            ),
+            (
+                {**REFERENCE_JSON, "edits": [{"path": [], "old": "a", "new": "b", "is_key": 0}]},
+                "invalid edit",
+            ),
+            (
+                {**REFERENCE_JSON, "edits": [{"path": [], "old": "a", "new": "b"}]},
+                "missing 'is_key'",
+            ),
+            ({"kind": "automation", "key": "1", "edits": []}, "missing 'label'"),
+        ],
+    )
+    def test_invalid_references(self, tmp_path, reference, message):
+        path = tmp_path / "undo.jsonl"
+        path.write_text(
+            "".join(
+                json.dumps(i) + "\n" for i in [HEADER, {"reference": reference}, {"change": CHANGE}]
+            )
+        )
+        with pytest.raises(undo.UndoFileError, match=f"line 2: {message}"):
+            load(path)
+
+
+class TestPlanReferenceUndo:
+    AFTER = {"triggers": [{"entity_id": "sensor.new_temp"}], "alias": "Heater off"}
+
+    def test_reverts(self):
+        step = plan_reference_undo(REFERENCE, self.AFTER)
+        assert step.config == {
+            "triggers": [{"entity_id": "sensor.old_temp"}],
+            "alias": "Heater off",
+        }
+        assert step.change == ReferenceChange(
+            "automation", "17", "automation 'Heater off' (id 17)", (EDIT.reversed(),)
+        )
+        assert step.notes == ()
+        assert step.describe() == [
+            "automation 'Heater off' (id 17)",
+            "  triggers[0].entity_id: sensor.new_temp -> sensor.old_temp",
+        ]
+
+    def test_edited_since(self):
+        current = {"triggers": [{"entity_id": "sensor.other"}]}
+        step = plan_reference_undo(REFERENCE, current)
+        assert step.config == current
+        assert not step.change.has_changes
+        assert step.describe() == [
+            "automation 'Heater off' (id 17)",
+            "  triggers[0].entity_id: changed since to 'sensor.other'; left as is",
+        ]
+
+    def test_already_reverted(self):
+        step = plan_reference_undo(REFERENCE, {"triggers": [{"entity_id": "sensor.old_temp"}]})
+        assert step.describe() == [
+            "automation 'Heater off' (id 17)",
+            "  triggers[0].entity_id: changed since to 'sensor.old_temp'; left as is",
+        ]
+
+    def test_nothing_recorded(self):
+        empty = ReferenceChange("automation", "17", "automation 'Heater off' (id 17)", ())
+        step = plan_reference_undo(empty, self.AFTER)
+        assert step.describe() == [
+            "automation 'Heater off' (id 17)",
+            "  nothing to undo (already as it was before)",
+        ]
+
+    def test_removed(self):
+        step = plan_reference_undo(REFERENCE, None)
+        assert step.change is None
+        assert step.describe() == [
+            "automation 'Heater off' (id 17)",
+            "  SKIPPED: not found in Home Assistant (removed since?)",
+        ]

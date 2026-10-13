@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import subprocess
@@ -7,7 +8,7 @@ import pytest
 
 from ha_rename import __version__, cli, undo
 from ha_rename.undo import UndoLog
-from tests.conftest import GOOD_TOKEN, SAMPLE_ENTITIES
+from tests.conftest import GOOD_TOKEN, SAMPLE_ENTITIES, entity, state
 
 PREFIX_ARGS = [
     "--old-id-prefix",
@@ -50,6 +51,7 @@ class TestParser:
         assert args.undo_file is None
         assert args.dry_run is False
         assert args.reset_token is False
+        assert args.update_references is True
         assert args.old_id_prefix == "skyvane_skyvane_station_backyard_station_"
         assert args.new_id_prefix == "skyvane_station_"
         assert args.entity_name_prefix == "Backyard Station"
@@ -61,6 +63,9 @@ class TestParser:
         assert args.ha_url == "wss://ha.example/api/websocket"
         assert args.dry_run is True
         assert args.reset_token is True
+
+    def test_no_update_references(self):
+        assert self.parse("--no-update-references").update_references is False
 
     def test_empty_new_prefix_allowed(self):
         args = cli.build_parser().parse_args(
@@ -118,6 +123,7 @@ class TestParser:
             "--old-id-prefix",
             "--new-id-prefix",
             "--entity-name-prefix",
+            "--no-update-references",
             "--ha-url",
             "--dry-run",
             "--reset-token",
@@ -606,3 +612,318 @@ def test_python_dash_m():
         [sys.executable, "-m", "ha_rename", "--version"], capture_output=True, text=True, check=True
     )
     assert result.stdout.strip() == f"ha-rename {__version__}"
+
+
+T_OLD = "sensor.skyvane_skyvane_station_backyard_station_temperature"
+T_NEW = "sensor.skyvane_station_temperature"
+H_OLD = "switch.skyvane_skyvane_station_backyard_station_heater"
+H_NEW = "switch.skyvane_station_heater"
+P_OLD = "device_tracker.skyvane_skyvane_station_backyard_station_phone"
+P_NEW = "device_tracker.skyvane_station_phone"
+# Shares a prefix with T_OLD, but isn't renamed.
+NOT_RENAMED = "sensor.skyvane_skyvane_station_backyard_station_temperature_max"
+
+
+def heater_off():
+    return {
+        "id": "17",
+        "alias": "Heater off",
+        "triggers": [{"trigger": "state", "entity_id": [T_OLD, NOT_RENAMED]}],
+        "conditions": [{"condition": "template", "value_template": f"{{{{ states('{T_OLD}') }}}}"}],
+        "actions": [
+            {"action": "switch.turn_off", "target": {"entity_id": H_OLD}},
+            {"action": "script.morning"},
+        ],
+        "mode": "single",
+    }
+
+
+def populate(ha):
+    """A Home Assistant with a reference to a renamed entity in every kind of target."""
+    ha.entities.append(entity(P_OLD, original_name="Backyard Station Phone"))
+    ha.states = [
+        state("automation.heater_off", "Heater off", id="17"),
+        state("automation.frost_alert", "Frost alert", id="18"),
+        state("automation.garage", "Garage"),
+        state("script.morning", "Morning"),
+        state("scene.evening", "Evening", id="1", entity_id=[H_OLD, "light.kitchen"]),
+        state("group.outside", "Outside", entity_id=[T_OLD]),
+    ]
+    ha.automations = {
+        "17": heater_off(),
+        "18": {
+            "id": "18",
+            "alias": "Frost alert",
+            "use_blueprint": {"path": "frost.yaml", "input": {"temperature_sensor": T_OLD}},
+        },
+    }
+    ha.raw_configs = {"automation.garage": {"triggers": [{"entity_id": T_OLD}]}}
+    ha.scripts = {
+        "morning": {"sequence": [{"action": "switch.turn_on", "target": {"entity_id": H_OLD}}]}
+    }
+    ha.scenes = {
+        "1": {
+            "id": "1",
+            "name": "Evening",
+            "entities": {
+                "light.kitchen": {"state": "on"},
+                H_OLD: {"state": "on"},
+                "light.hall": {},
+            },
+        }
+    }
+    ha.add_dashboard("weather", {"views": [{"cards": [{"type": "gauge", "entity": T_OLD}]}]})
+    ha.add_dashboard("garden", {"views": [{"cards": [{"entity": T_OLD}]}]}, mode="yaml")
+    ha.persons["storage"] = [{"id": "alice", "name": "Alice", "device_trackers": [P_OLD]}]
+    ha.energy = {"energy_sources": [{"type": "grid", "stat_energy_from": T_OLD}]}
+    return copy.deepcopy(
+        {
+            "automations": ha.automations,
+            "scripts": ha.scripts,
+            "scenes": ha.scenes,
+            "dashboards": ha.dashboards,
+            "persons": ha.persons,
+            "energy": ha.energy,
+        }
+    )
+
+
+def snapshot(ha):
+    return {
+        "automations": ha.automations,
+        "scripts": ha.scripts,
+        "scenes": ha.scenes,
+        "dashboards": ha.dashboards,
+        "persons": ha.persons,
+        "energy": ha.energy,
+    }
+
+
+class TestReferences:
+    def run(self, fake_ha, memory_keyring, *extra):
+        store(memory_keyring, fake_ha.url)
+        return cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url, *extra])
+
+    def test_updates_every_target(self, fake_ha, memory_keyring, capsys):
+        populate(fake_ha)
+        assert self.run(fake_ha, memory_keyring) == 0
+
+        automation = fake_ha.automations["17"]
+        assert automation["triggers"][0]["entity_id"] == [T_NEW, NOT_RENAMED]
+        assert automation["actions"][0]["target"]["entity_id"] == H_NEW
+        assert automation["actions"][1] == {"action": "script.morning"}
+        assert automation["conditions"] == heater_off()["conditions"]  # templates untouched
+        assert {k: v for k, v in automation.items() if k not in ("triggers", "actions")} == {
+            k: v for k, v in heater_off().items() if k not in ("triggers", "actions")
+        }
+        assert fake_ha.automations["18"]["use_blueprint"]["input"] == {"temperature_sensor": T_NEW}
+        assert fake_ha.scripts["morning"]["sequence"][0]["target"]["entity_id"] == H_NEW
+        assert list(fake_ha.scenes["1"]["entities"]) == ["light.kitchen", H_NEW, "light.hall"]
+        assert fake_ha.dashboards["weather"]["views"][0]["cards"][0]["entity"] == T_NEW
+        assert fake_ha.dashboards["garden"]["views"][0]["cards"][0]["entity"] == T_OLD
+        assert fake_ha.persons["storage"][0]["device_trackers"] == [P_NEW]
+        assert fake_ha.energy["energy_sources"][0]["stat_energy_from"] == T_NEW
+        assert sorted((kind, key) for kind, key, _ in fake_ha.saves) == [
+            ("automation", "17"),
+            ("automation", "18"),
+            ("dashboard", "weather"),
+            ("energy", "energy"),
+            ("person", "alice"),
+            ("scene", "1"),
+            ("script", "morning"),
+        ]
+
+        out = capsys.readouterr().out
+        assert "\nReferences to update (8):\n" in out
+        assert "\nNeeds manual fix (4):\n" in out
+        assert (
+            "automation 'Heater off' (id 17)\n"
+            f"  conditions[0].value_template: mentions {T_OLD} (now {T_NEW})\n"
+        ) in out
+        assert (
+            f"automation 'Garage' (defined in YAML)\n  triggers[0].entity_id: {T_OLD} -> {T_NEW}\n"
+            in out
+        )
+        assert "dashboard 'Garden' (garden, YAML mode)\n" in out
+        assert f"group 'Outside' (group.outside)\n  entity_id[0]: {T_OLD} -> {T_NEW}\n" in out
+        assert out.rstrip().endswith("Done.")
+
+    def test_dry_run_output(self, fake_ha, memory_keyring, capsys):
+        fake_ha.states = [state("automation.heater_off", "Heater off", id="17")]
+        fake_ha.automations = {"17": heater_off()}
+        fake_ha.add_dashboard("weather", {"views": [{"cards": [{"entity": T_OLD}]}]})
+        assert self.run(fake_ha, memory_keyring, "--dry-run") == 0
+        assert fake_ha.saves == []
+        assert fake_ha.updates == []
+        out = capsys.readouterr().out
+        references = out[out.index("\nReferences to update") :]
+        assert references == (
+            "\nReferences to update (3):\n"
+            "automation 'Heater off' (id 17)\n"
+            f"  triggers[0].entity_id[0]: {T_OLD} -> {T_NEW}\n"
+            f"  actions[0].target.entity_id: {H_OLD} -> {H_NEW}\n"
+            "dashboard 'Weather' (weather)\n"
+            f"  views[0].cards[0].entity: {T_OLD} -> {T_NEW}\n"
+            "\n"
+            "Needs manual fix (1):\n"
+            "automation 'Heater off' (id 17)\n"
+            f"  conditions[0].value_template: mentions {T_OLD} (now {T_NEW})\n"
+            "\n"
+            "Dry run only; nothing changed.\n"
+        )
+
+    def test_rejected_rename_keeps_its_references(self, fake_ha, memory_keyring, capsys):
+        fake_ha.states = [state("automation.heater_off", "Heater off", id="17")]
+        fake_ha.automations = {"17": heater_off()}
+        fake_ha.fail_updates = {T_OLD}
+        assert self.run(fake_ha, memory_keyring) == 1
+        automation = fake_ha.automations["17"]
+        assert automation["triggers"][0]["entity_id"] == [T_OLD, NOT_RENAMED]
+        assert automation["actions"][0]["target"]["entity_id"] == H_NEW
+        out = capsys.readouterr().out
+        references = out[out.index("\nReferences to update") :]
+        assert T_OLD not in references
+        assert "Needs manual fix" not in references
+
+    def test_only_renamed_ids_are_planned(self, fake_ha, memory_keyring, capsys):
+        # Matching entities whose ID doesn't change (only their name) aren't references.
+        fake_ha.states = [state("automation.heater_off", "Heater off", id="17")]
+        fake_ha.automations = {"17": heater_off()}
+        argv = ["--old-id-prefix", "skyvane_", "--new-id-prefix", "skyvane_"]
+        store(memory_keyring, fake_ha.url)
+        assert (
+            cli.main([*argv, "--entity-name-prefix", "Backyard Station", "--ha-url", fake_ha.url])
+            == 0
+        )
+        assert fake_ha.saves == []
+        assert "References to update" not in capsys.readouterr().out
+
+    def test_only_manual_fixes(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        fake_ha.states = [state("automation.garage", "Garage")]
+        fake_ha.raw_configs = {"automation.garage": {"triggers": [{"entity_id": T_OLD}]}}
+        assert self.run(fake_ha, memory_keyring) == 0
+        out = capsys.readouterr().out
+        assert "References to update" not in out
+        assert "Needs manual fix (1):\nautomation 'Garage' (defined in YAML)\n" in out
+        [path] = undo_files(in_tmp_dir)
+        assert len(undo.load(path).items) == 3  # just the renames
+
+    def test_failed_save_does_not_stop_the_run(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        populate(fake_ha)
+        fake_ha.fail_saves = {"17"}
+        assert self.run(fake_ha, memory_keyring) == 1
+        out = capsys.readouterr().out
+        assert "automation 'Heater off' (id 17)\n" in out
+        assert "  ERROR: http_400: Message malformed: can't save 17\n" in out
+        assert "Done with 1 error(s)." in out
+        assert fake_ha.automations["17"] == heater_off()
+        assert fake_ha.scripts["morning"]["sequence"][0]["target"]["entity_id"] == H_NEW
+        [path] = undo_files(in_tmp_dir)
+        labels = [c.label for c in undo.load(path).items if isinstance(c, undo.ReferenceChange)]
+        assert "automation 'Heater off' (id 17)" not in labels
+        assert "script 'Morning' (script.morning)" in labels
+
+    def test_opting_out(self, fake_ha, memory_keyring, capsys):
+        populate(fake_ha)
+        assert self.run(fake_ha, memory_keyring, "--no-update-references") == 0
+        assert fake_ha.saves == []
+        assert len(fake_ha.updates) == 4
+        out = capsys.readouterr().out
+        assert "References" not in out
+        assert "Needs manual fix" not in out
+
+    def test_bad_rest_url_fails_before_renaming(self, fake_ha, memory_keyring, monkeypatch, capsys):
+        populate(fake_ha)
+        monkeypatch.undo()  # the real REST address derivation
+        store(memory_keyring, fake_ha.url)
+        url = fake_ha.url.replace("/api/websocket", "/websocket")
+        store(memory_keyring, url)
+        assert cli.main([*PREFIX_ARGS, "--ha-url", url]) == 1
+        assert fake_ha.updates == []
+        assert "can't work out the REST API address" in capsys.readouterr().err
+
+
+class TestUndoReferences:
+    def apply(self, fake_ha, memory_keyring, in_tmp_dir):
+        original = populate(fake_ha)
+        stored(memory_keyring, fake_ha)
+        assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 0
+        [path] = undo_files(in_tmp_dir)
+        return original, path
+
+    def test_undo_reverts_references_and_renames(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        original, path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        capsys.readouterr()
+        assert cli.main(["--undo", str(path)]) == 0
+        assert snapshot(fake_ha) == original
+        assert list(fake_ha.scenes["1"]["entities"]) == ["light.kitchen", H_OLD, "light.hall"]
+        assert all(
+            e["entity_id"] in {x["entity_id"] for x in SAMPLE_ENTITIES} | {P_OLD}
+            for e in fake_ha.entities
+        )
+        out = capsys.readouterr().out
+        assert out.startswith(f"Undoing 11 change(s) from {path}\n")
+        assert (
+            f"automation 'Heater off' (id 17)\n  triggers[0].entity_id[0]: {T_NEW} -> {T_OLD}\n"
+        ) in out
+        # References first: they were recorded after the renames.
+        assert out.index("energy settings") < out.index(T_NEW + "\n  -> " + T_OLD)
+
+    def test_undo_of_undo_redoes_references(self, fake_ha, memory_keyring, in_tmp_dir):
+        _, path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        updated = copy.deepcopy(snapshot(fake_ha))
+        redo = in_tmp_dir / "redo.jsonl"
+        assert cli.main(["--undo", str(path), "--undo-file", str(redo)]) == 0
+        assert cli.main(["--undo", str(redo)]) == 0
+        assert snapshot(fake_ha) == updated
+
+    def test_undo_keeps_edits_made_since(self, fake_ha, memory_keyring, in_tmp_dir, capsys):
+        _, path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        fake_ha.automations["17"]["triggers"][0]["entity_id"][0] = "sensor.outdoor"
+        assert cli.main(["--undo", str(path)]) == 0
+        automation = fake_ha.automations["17"]
+        assert automation["triggers"][0]["entity_id"][0] == "sensor.outdoor"
+        assert automation["actions"][0]["target"]["entity_id"] == H_OLD
+        out = capsys.readouterr().out
+        assert "  triggers[0].entity_id[0]: changed since to 'sensor.outdoor'; left as is\n" in out
+
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_undo_skips_removed_targets(self, fake_ha, memory_keyring, in_tmp_dir, capsys, dry_run):
+        _, path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        del fake_ha.automations["17"]
+        saves = len(fake_ha.saves)
+        argv = ["--undo", str(path), *(["--dry-run"] if dry_run else [])]
+        assert cli.main(argv) == 1
+        out = capsys.readouterr().out
+        assert (
+            "automation 'Heater off' (id 17)\n"
+            "  SKIPPED: not found in Home Assistant (removed since?)\n"
+        ) in out
+        if dry_run:
+            assert len(fake_ha.saves) == saves
+        else:
+            assert fake_ha.scripts["morning"]["sequence"][0]["target"]["entity_id"] == H_OLD
+
+    def test_undo_only_reverts_recorded_updates(self, fake_ha, memory_keyring, in_tmp_dir):
+        _, path = self.apply(fake_ha, memory_keyring, in_tmp_dir)
+        fake_ha.automations["19"] = {"id": "19", "triggers": [{"entity_id": T_NEW}]}
+        assert cli.main(["--undo", str(path)]) == 0
+        assert fake_ha.automations["19"] == {"id": "19", "triggers": [{"entity_id": T_NEW}]}
+
+    def test_reference_with_lost_reply_is_still_recorded(
+        self, fake_ha, memory_keyring, in_tmp_dir, capsys
+    ):
+        populate(fake_ha)
+        fake_ha.drop_saves = {"17"}
+        stored(memory_keyring, fake_ha)
+        assert cli.main([*PREFIX_ARGS, "--ha-url", fake_ha.url]) == 1
+        assert f"connection to {fake_ha.url} failed" in capsys.readouterr().err
+        [path] = undo_files(in_tmp_dir)
+        labels = [c.label for c in undo.load(path).items if isinstance(c, undo.ReferenceChange)]
+        assert labels[-1] == "automation 'Heater off' (id 17)"
+
+    def test_undo_cannot_be_combined_with_no_update_references(self, capsys):
+        with pytest.raises(SystemExit) as exc:
+            cli.main(["--undo", "x.jsonl", "--no-update-references"])
+        assert exc.value.code == 2
+        assert "--undo can't be combined with --no-update-references" in capsys.readouterr().err

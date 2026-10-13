@@ -7,15 +7,18 @@ import re
 import shlex
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import shtab
 import websockets
 
-from ha_rename import __version__, client, credentials, undo
-from ha_rename.rename import check_prefix_separators, plan_renames, validate_id_prefix
-from ha_rename.undo import Change, UndoLog
+from ha_rename import __version__, client, credentials, targets, undo
+from ha_rename.references import TargetPlan, apply_edits, keep_accepted, plan_references
+from ha_rename.rename import Rename, check_prefix_separators, plan_renames, validate_id_prefix
+from ha_rename.undo import Change, Recorded, ReferenceChange, UndoLog
 
 DEFAULT_URL = "ws://homeassistant.local:8123/api/websocket"
 
@@ -25,6 +28,11 @@ Bulk-rename Home Assistant entities via the WebSocket API.
 Every entity whose ID (the part after "<domain>.") starts with --old-id-prefix
 has that prefix replaced with --new-id-prefix. If the entity's name starts with
 --entity-name-prefix, that text is removed from the name as well.
+
+References to the renamed entity IDs are then updated in automations, scripts and
+scenes created in the UI, storage-mode dashboards, persons and the energy settings.
+References that can't be updated automatically (inside templates, or in YAML) are
+listed so you can fix them by hand. Use --no-update-references to only rename.
 
 By default the changes are applied. Use --dry-run first to see what would change.
 Every run that changes something saves an undo file; reverse that run with
@@ -126,6 +134,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="show what would change without changing anything",
     )
     parser.add_argument(
+        "--no-update-references",
+        dest="update_references",
+        action="store_false",
+        help="only rename entities; don't update or list references to them in "
+        "automations, scripts, scenes, dashboards, persons and energy settings "
+        "(not with --undo)",
+    )
+    parser.add_argument(
         "--reset-token",
         action="store_true",
         help="ignore the stored access token and prompt for a new one",
@@ -150,6 +166,8 @@ def check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Non
     """Checks argparse can't express: the rename options are required unless --undo."""
     given = [opt for opt, attr in RENAME_OPTIONS.items() if getattr(args, attr) is not None]
     if args.undo is not None:
+        if not args.update_references:
+            given.append("--no-update-references")
         if given:
             parser.error(f"--undo can't be combined with {', '.join(given)}")
         return
@@ -195,6 +213,15 @@ def default_undo_path() -> Path:
     return path
 
 
+@dataclass(frozen=True)
+class _Item:
+    """A change to print and, unless dry run, apply; ``config`` is a target's new config."""
+
+    lines: list[str]
+    change: Recorded | None
+    config: Any = None
+
+
 async def run(
     url: str,
     token: str,
@@ -208,25 +235,46 @@ async def run(
             on_authenticated()
         entries = await ha.list_entities()
 
-        failures = 0
-        items: list[tuple[list[str], Change | None]]
+        plans: list[TargetPlan] = []
         if undo_file is not None:
-            steps = undo.plan_undo(entries, undo_file.changes)
-            print(f"Undoing {len(steps)} change(s) from {undo_file.path}\n")
-            items = [(step.describe(), step.change) for step in steps]
-            failures = sum(step.change is None for step in steps)
+            items, failures = await _plan_undo(ha, entries, undo_file)
+            print(f"Undoing {len(items)} change(s) from {undo_file.path}\n")
         else:
             renames = plan_renames(
                 entries, args.old_id_prefix, args.new_id_prefix, args.entity_name_prefix
             )
+            # Read everything before changing anything, so a dry run shows the same plan.
+            if args.update_references:
+                plans = await _plan_references(ha, entries, renames)
             print(f"Found {len(renames)} matching entities\n")
-            items = [(rename.describe(), rename.to_change()) for rename in renames]
+            items = [_Item(rename.describe(), rename.to_change()) for rename in renames]
+            failures = 0
 
-        failures += await _apply(ha, items, url, args)
+        log = None
+        pending = any(i.change is not None and i.change.has_changes for i in items) or any(
+            plan.edits for plan in plans
+        )
+        if pending and not args.dry_run:
+            log = UndoLog.create(args.undo_file or default_undo_path(), url)
+        try:
+            failed = await _apply(ha, items, log)
+            failures += len(failed)
+            if plans:
+                accepted = {
+                    i.change.entity_id
+                    for i in items
+                    if isinstance(i.change, Change)
+                    and i.change.renames_entity
+                    and i.change not in failed
+                }
+                failures += await _update_references(ha, keep_accepted(plans, accepted), log)
+        finally:
+            if log is not None:
+                _report_undo_file(log)
 
     if args.dry_run:
         print("\nDry run only; nothing changed.")
-        if failures:  # only --undo can fail without changing anything: skipped entities
+        if failures:  # only --undo can fail without changing anything: skipped changes
             print(f"{failures} recorded change(s) would be skipped.")
             return 1
         return 0
@@ -237,43 +285,101 @@ async def run(
     return 0
 
 
-async def _apply(
-    ha: client.HomeAssistantClient,
-    items: list[tuple[list[str], Change | None]],
-    url: str,
-    args: argparse.Namespace,
-) -> int:
-    """Print each item and, unless dry run, apply it and record it. Returns the failures."""
-    pending = [change for _, change in items if change is not None and change.has_changes]
-    log = None
-    if pending and not args.dry_run:
-        log = UndoLog.create(args.undo_file or default_undo_path(), url)
+async def _plan_references(
+    ha: client.HomeAssistantClient, entries: list[dict[str, Any]], renames: list[Rename]
+) -> list[TargetPlan]:
+    mapping = {r.entity_id: r.new_entity_id for r in renames if r.entity_id != r.new_entity_id}
+    if not mapping:
+        return []
+    return plan_references(await targets.load_targets(ha, entries), mapping)
 
-    failures = 0
-    try:
-        for lines, change in items:
-            print("\n".join(lines))
-            if log is None or change is None or not change.has_changes:
-                continue
-            # Record first: if the reply is lost, the change may still have been applied.
-            log.record(change)
-            try:
+
+async def _plan_undo(
+    ha: client.HomeAssistantClient, entries: list[dict[str, Any]], undo_file: undo.UndoFile
+) -> tuple[list[_Item], int]:
+    """The items reversing ``undo_file``, newest first, and how many must be skipped."""
+    entity_steps = iter(undo.plan_undo(entries, undo_file.changes))
+    items = []
+    skipped = 0
+    for recorded in reversed(undo_file.items):
+        if isinstance(recorded, Change):
+            step = next(entity_steps)
+            items.append(_Item(step.describe(), step.change))
+        else:
+            current = await targets.fetch(ha, recorded.kind, recorded.key)
+            step = undo.plan_reference_undo(recorded, current)
+            items.append(_Item(step.describe(), step.change, step.config))
+        skipped += step.change is None
+    return items, skipped
+
+
+async def _update_references(
+    ha: client.HomeAssistantClient, plans: list[TargetPlan], log: UndoLog | None
+) -> int:
+    """Print and (unless dry run) apply the reference updates, then list the manual fixes.
+
+    Returns the number of failures.
+    """
+    updates = [plan for plan in plans if plan.edits]
+    failed: list[Recorded] = []
+    if updates:
+        print(f"\nReferences to update ({sum(len(plan.edits) for plan in updates)}):")
+        items = []
+        for plan in updates:
+            target = plan.target
+            change = ReferenceChange(target.kind, target.key, target.label, plan.edits)
+            config = apply_edits(target.config, plan.edits).config
+            items.append(_Item(change.describe(), change, config))
+        failed = await _apply(ha, items, log)
+
+    manual = [plan for plan in plans if plan.manual]
+    if manual:
+        print(f"\nNeeds manual fix ({sum(len(plan.manual) for plan in manual)}):")
+        for plan in manual:
+            print(plan.target.label)
+            for reference in plan.manual:
+                print(f"  {reference.describe()}")
+    return len(failed)
+
+
+async def _apply(
+    ha: client.HomeAssistantClient, items: list[_Item], log: UndoLog | None
+) -> list[Recorded]:
+    """Print each item and, if there's a log (not a dry run), record and apply it.
+
+    Returns the changes Home Assistant rejected.
+    """
+    failed = []
+    for item in items:
+        print("\n".join(item.lines))
+        change = item.change
+        if log is None or change is None or not change.has_changes:
+            continue
+        # Record first: if the reply is lost, the change may still have been applied.
+        log.record(change)
+        try:
+            if isinstance(change, Change):
                 await ha.call(change.payload())
-            except client.CommandError as e:
-                log.forget(change)
-                failures += 1
-                print(f"  ERROR: {e}")
-    finally:
-        if log is not None and not log.discard_if_empty():
-            print(f"\nUndo file: {log.path}")
-            quoted = shell_quote(str(log.path))
-            # "--undo=PATH" so a path starting with "-" isn't taken for an option.
-            option = "--undo=" if str(log.path).startswith("-") else "--undo "
-            if quoted is None:
-                print("To reverse these changes, pass that file to: ha-rename --undo")
             else:
-                print(f"To reverse these changes, run: ha-rename {option}{quoted}")
-    return failures
+                await targets.save(ha, change.kind, change.key, item.config, change.edits)
+        except client.CommandError as e:
+            log.forget(change)
+            failed.append(change)
+            print(f"  ERROR: {e}")
+    return failed
+
+
+def _report_undo_file(log: UndoLog) -> None:
+    if log.discard_if_empty():
+        return
+    print(f"\nUndo file: {log.path}")
+    quoted = shell_quote(str(log.path))
+    # "--undo=PATH" so a path starting with "-" isn't taken for an option.
+    option = "--undo=" if str(log.path).startswith("-") else "--undo "
+    if quoted is None:
+        print("To reverse these changes, pass that file to: ha-rename --undo")
+    else:
+        print(f"To reverse these changes, run: ha-rename {option}{quoted}")
 
 
 def _error(message: str) -> int:
@@ -292,7 +398,7 @@ def main(argv: list[str] | None = None) -> int:
             undo_file = undo.load(args.undo)
         except undo.UndoFileError as e:
             return _error(str(e))
-        if not undo_file.changes:
+        if not undo_file.items:
             print(f"Nothing to undo: {args.undo} has no recorded changes.")
             return 0
         url = args.ha_url or undo_file.ha_url
