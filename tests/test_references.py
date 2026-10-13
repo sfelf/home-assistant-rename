@@ -231,6 +231,20 @@ class TestApplyEdits:
         assert reverted.notes == []
         assert reverted.config == config
 
+    def test_chained_keys_with_a_value_below(self):
+        # The value under the original sensor.aa ends up under sensor.aaa, while the old
+        # sensor.a entry is now sensor.aa: undo must put the keys back first.
+        renames = {"sensor.a": "sensor.aa", "sensor.aa": "sensor.aaa"}
+        config = {"entities": {"sensor.a": {"n": 1}, "sensor.aa": {"ref": "sensor.aa"}}}
+        edits, _ = scan(config, renames)
+        result = apply_edits(config, edits)
+        assert result.config == {
+            "entities": {"sensor.aa": {"n": 1}, "sensor.aaa": {"ref": "sensor.aaa"}}
+        }
+        reverted = revert_edits(result.config, result.applied)
+        assert reverted.notes == []
+        assert reverted.config == config
+
     def test_swapped_keys_are_left(self):
         renames = {"light.a": "light.b", "light.b": "light.a"}
         config = {"entities": {"light.a": 1, "light.b": 2}}

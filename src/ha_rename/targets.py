@@ -18,6 +18,9 @@ from ha_rename.client import CommandError, HomeAssistantClient
 from ha_rename.references import Edit, Target
 
 REST_KINDS = ("automation", "script", "scene")
+# The registry platform of each kind's UI-managed entities (scenes belong to Home
+# Assistant's own scene platform, not to other integrations' scenes).
+REST_KIND_PLATFORMS = {"automation": "automation", "script": "script", "scene": "homeassistant"}
 DEFAULT_DASHBOARD = "lovelace"  # the default dashboard's panel URL path
 YAML = "defined in YAML"
 # Error codes Home Assistant uses when the thing asked for doesn't exist.
@@ -121,7 +124,7 @@ async def _without_state(ha: HomeAssistantClient, entry: dict[str, Any]) -> Targ
     """
     kind = entry["entity_id"].split(".", 1)[0]
     key = entry.get("unique_id")
-    if kind not in REST_KINDS or entry.get("platform") != kind or not key:
+    if REST_KIND_PLATFORMS.get(kind) != entry.get("platform") or not key:
         return None
     config = await ha.rest("GET", _rest_path(kind, key))
     if config is None:

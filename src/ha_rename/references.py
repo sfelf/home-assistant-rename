@@ -126,11 +126,13 @@ class EditResult:
     notes: list[str] = field(default_factory=list)
 
 
-def apply_edits(config: Any, edits: Iterable[Edit]) -> EditResult:
+def apply_edits(config: Any, edits: Iterable[Edit], *, keys_first: bool = False) -> EditResult:
     """Apply ``edits`` to a copy of ``config``, each only where it still finds ``old``.
 
     Edits whose location no longer holds ``old`` are left out and described in
-    ``notes``. A renamed key keeps its position in its dict.
+    ``notes``. A renamed key keeps its position in its dict. Value paths name keys as
+    they were before any key edit, so values go first, unless ``keys_first`` (when
+    undoing, the keys must be put back before those paths fit again).
     """
     result = EditResult(copy.deepcopy(config))
     edits = list(edits)
@@ -173,9 +175,10 @@ def apply_edits(config: Any, edits: Iterable[Edit]) -> EditResult:
         result.applied.append(edit)
         return True
 
-    for edit in edits:
-        if not edit.is_key:
-            apply_value(edit)
+    if not keys_first:
+        for edit in edits:
+            if not edit.is_key:
+                apply_value(edit)
     # Deepest keys first, so the paths of shallower ones still resolve. Keys are retried
     # while any applies, since one may free the key another is renamed to (a -> aa when
     # aa -> aaa), in whichever order they come.
@@ -187,12 +190,16 @@ def apply_edits(config: Any, edits: Iterable[Edit]) -> EditResult:
         pending = remaining
     for edit in pending:
         result.notes.append(f"{format_path(edit.path)}: changed since; left as is")
+    if keys_first:
+        for edit in edits:
+            if not edit.is_key:
+                apply_value(edit)
     return result
 
 
 def revert_edits(config: Any, edits: Iterable[Edit]) -> EditResult:
     """Undo ``edits`` on a copy of ``config``, where they are still in place."""
-    return apply_edits(config, [e.reversed() for e in edits])
+    return apply_edits(config, [e.reversed() for e in edits], keys_first=True)
 
 
 def _resolve(node: Any, element: str | int, aliases: dict[str, str]) -> str | int | None:

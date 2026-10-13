@@ -343,7 +343,7 @@ class TestWithoutState:
                 platform="script",
                 unique_id="morning",
             ),
-            entity("scene.evening", platform="scene", unique_id="1"),
+            entity("scene.evening", platform="homeassistant", unique_id="1"),
         ]
         assert load(fake_ha, entries) == [
             Target("automation", "17", "automation 'Heater off' (id 17)", HEATER_OFF),
@@ -364,6 +364,7 @@ class TestWithoutState:
             entity("automation.no_key", platform="automation"),
             entity("light.kitchen", platform="hue", unique_id="17"),
             entity("scene.other_platform", platform="hue", unique_id="17"),
+            entity("scene.wrong_platform", platform="scene", unique_id="17"),
         ],
     )
     def test_others_are_left_out(self, fake_ha, entry):
