@@ -434,11 +434,18 @@ def plan_reference_undo(
     # Locations just put back hold an old ID that's right, even if it's also another
     # entity's new ID (a -> aa while aa -> aaa); anywhere else, it's a leftover.
     put_back = {(*e.path[:-1], e.new) if e.is_key else e.path for e in result.applied}
-    leftovers, _ = scan(result.config, {e.new: e.old for e in edits})
+    leftovers, hits = scan(result.config, {e.new: e.old for e in edits})
     notes += [
         f"{format_path(e.path)}: still refers to {e.old}; left as is"
         for e in leftovers
         if e.path not in put_back
+    ]
+    # In text, an ID that's also one given back can't be told apart, so only the others.
+    given_back = {e.new for e in result.applied}
+    notes += [
+        f"{format_path(h.path)}: still mentions {h.old}; left as is"
+        for h in hits
+        if h.old not in given_back
     ]
     # Recorded so this undo can itself be undone (redo).
     change = ReferenceChange(recorded.kind, recorded.key, recorded.label, rebase(result.applied))

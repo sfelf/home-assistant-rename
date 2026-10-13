@@ -614,6 +614,30 @@ class TestPlanReferenceUndo:
         assert redone.config == after
         assert plan_reference_undo(redone.change, redone.config).config == original
 
+    def test_reference_moved_into_text_is_a_leftover(self):
+        current = {
+            "triggers": [{"entity_id": "sensor.other"}],
+            "conditions": [{"value_template": "{{ states('sensor.new_temp') }}"}],
+        }
+        step = plan_reference_undo(REFERENCE, current)
+        assert step.notes == (
+            "triggers[0].entity_id: changed since to 'sensor.other'; left as is",
+            "conditions[0].value_template: still mentions sensor.new_temp; left as is",
+        )
+
+    def test_text_mentioning_an_id_given_back_is_not_a_leftover(self):
+        chain = ReferenceChange(
+            "automation",
+            "17",
+            "automation 'Chain' (id 17)",
+            (
+                Edit(("entity_id", 0), "sensor.a", "sensor.aa"),
+                Edit(("entity_id", 1), "sensor.aa", "sensor.aaa"),
+            ),
+        )
+        current = {"entity_id": ["sensor.aa", "sensor.aaa"], "t": "{{ states('sensor.aa') }}"}
+        assert plan_reference_undo(chain, current).notes == ()
+
     def test_removed(self):
         step = plan_reference_undo(REFERENCE, None)
         assert step.change is None

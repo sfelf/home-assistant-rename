@@ -256,6 +256,17 @@ class TestApplyEdits:
         assert reverted.notes == []
         assert reverted.config == config
 
+    def test_chained_keys_after_an_entry_was_deleted(self):
+        renames = {"sensor.a": "sensor.aa", "sensor.aa": "sensor.aaa"}
+        config = {"entities": {"sensor.a": "A", "sensor.aa": "B"}}
+        edits, _ = scan(config, renames)
+        updated = apply_edits(config, edits).config
+        assert updated == {"entities": {"sensor.aa": "A", "sensor.aaa": "B"}}
+        del updated["entities"]["sensor.aa"]  # A deleted since
+        result = revert_edits(updated, edits)
+        assert result.config == {"entities": {"sensor.aa": "B"}}
+        assert result.notes == ["entities['sensor.aa']: changed since; left as is"]
+
     def test_swapped_keys_are_left(self):
         renames = {"light.a": "light.b", "light.b": "light.a"}
         config = {"entities": {"light.a": 1, "light.b": 2}}

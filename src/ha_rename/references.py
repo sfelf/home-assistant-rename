@@ -171,13 +171,20 @@ def apply_edits(config: Any, edits: Iterable[Edit], *, keys_first: bool = False)
             state = f"changed since to {container[edit.path[-1]]!r}"
         result.notes.append(f"{format_path(edit.path)}: {state}; left as is")
 
+    # Keys made by this call: such an entry is never renamed again, as it isn't the one a
+    # pending edit was recorded for (a -> aa when aa -> aaa was put back over it).
+    made: set[Path] = set()
+
     def apply_key(edit: Edit) -> bool:
         parent = node_at(edit.path[:-1])
         if not (isinstance(parent, dict) and edit.old in parent and edit.new not in parent):
             return False
+        if (*edit.path[:-1], edit.old) in made:
+            return False
         items = [(edit.new if k == edit.old else k, v) for k, v in parent.items()]
         parent.clear()
         parent.update(items)
+        made.add((*edit.path[:-1], edit.new))
         result.applied.append(edit)
         return True
 
