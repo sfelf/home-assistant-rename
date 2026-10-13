@@ -12,7 +12,7 @@ one of three ways:
 
 import copy
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -249,12 +249,46 @@ def _has(node: Any, element: str | int) -> bool:
 
 
 @dataclass(frozen=True)
+class Fix:
+    """Where in Home Assistant a target's references are fixed by hand.
+
+    ``page`` is a path relative to Home Assistant's base URL, or None if the target has
+    no page. When the path ends with the target's entity ID, ``entity_id`` is that ID,
+    so the link can follow the target's own rename. ``in_yaml`` means the fix is made in
+    the YAML file that defines the target, and its page (if any) is read-only.
+    ``integration`` names the integration that manages the target.
+    """
+
+    page: str | None = None
+    entity_id: str | None = None
+    in_yaml: bool = False
+    integration: str | None = None
+
+    def describe(self, base_url: str | None, renames: Mapping[str, str]) -> list[str]:
+        """The lines saying where to fix it; ``renames`` maps old to new entity IDs.
+
+        Without a ``base_url`` (Home Assistant's HTTP address), there's no link.
+        """
+        lines = []
+        if self.integration is not None:
+            lines.append(f"managed by the {self.integration} integration")
+        if self.in_yaml:
+            lines.append("fix in the YAML file that defines it")
+        if self.page is not None and base_url is not None:
+            page = self.page
+            if self.entity_id in renames:
+                page = page.removesuffix(self.entity_id) + renames[self.entity_id]
+            lines.append(f"{'view' if self.in_yaml else 'open'}: {base_url}/{page}")
+        return lines
+
+
+@dataclass(frozen=True)
 class Target:
     """A place in Home Assistant that may refer to entities.
 
     ``key`` identifies it when saving (an automation's ``id``, a script's key, a
     dashboard's URL path...). Targets that aren't ``editable`` are only scanned, so the
-    user can fix their references by hand.
+    user can fix their references by hand; ``fix`` says where.
     """
 
     kind: str
@@ -262,6 +296,7 @@ class Target:
     label: str
     config: Any
     editable: bool = True
+    fix: Fix = Fix()
 
 
 @dataclass(frozen=True)

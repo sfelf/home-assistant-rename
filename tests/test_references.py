@@ -4,6 +4,7 @@ import pytest
 
 from ha_rename.references import (
     Edit,
+    Fix,
     Target,
     TextHit,
     apply_edits,
@@ -384,3 +385,45 @@ class TestKeepAccepted:
         [plan] = plan_references([TestPlanReferences.AUTOMATION_TARGET], RENAMES)
         assert keep_accepted([plan], set()) == []
         assert keep_accepted([plan], {"sensor.a_temp"})[0].manual == plan.manual
+
+
+class TestFix:
+    BASE = "http://ha:8123"
+
+    def test_nothing_to_say(self):
+        assert Fix().describe(self.BASE, {}) == []
+
+    def test_page(self):
+        fix = Fix("config/automation/edit/17")
+        assert fix.describe(self.BASE, {}) == ["open: http://ha:8123/config/automation/edit/17"]
+
+    def test_yaml_with_read_only_page(self):
+        fix = Fix("config/automation/show/automation.garage", "automation.garage", True)
+        assert fix.describe(self.BASE, {}) == [
+            "fix in the YAML file that defines it",
+            "view: http://ha:8123/config/automation/show/automation.garage",
+        ]
+
+    def test_yaml_without_page(self):
+        assert Fix(in_yaml=True).describe(self.BASE, {}) == ["fix in the YAML file that defines it"]
+
+    def test_integration(self):
+        fix = Fix(integration="hue")
+        assert fix.describe(self.BASE, {}) == ["managed by the hue integration"]
+
+    def test_page_follows_rename(self):
+        fix = Fix("config/script/show/script.a_x", "script.a_x", True)
+        renames = {"script.a_x": "script.b_x", "sensor.a_temp": "sensor.b_temp"}
+        assert fix.describe(self.BASE, renames)[-1] == (
+            "view: http://ha:8123/config/script/show/script.b_x"
+        )
+
+    def test_other_renames_leave_page_alone(self):
+        fix = Fix("config/script/show/script.a_x", "script.a_x", True)
+        assert fix.describe(self.BASE, {"script.a_x_2": "script.b_x_2"})[-1] == (
+            "view: http://ha:8123/config/script/show/script.a_x"
+        )
+
+    def test_no_link_without_base_url(self):
+        fix = Fix("config/automation/show/automation.garage", "automation.garage", True)
+        assert fix.describe(None, {}) == ["fix in the YAML file that defines it"]

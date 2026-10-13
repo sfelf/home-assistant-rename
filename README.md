@@ -61,13 +61,13 @@ Install a release (see [Releases](https://github.com/sfelf/home-assistant-rename
 for the latest version) with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv tool install git+https://github.com/sfelf/home-assistant-rename.git@v0.3.0
+uv tool install git+https://github.com/sfelf/home-assistant-rename.git@v0.4.0
 ```
 
 Or with [pipx](https://pipx.pypa.io/):
 
 ```bash
-pipx install git+https://github.com/sfelf/home-assistant-rename.git@v0.3.0
+pipx install git+https://github.com/sfelf/home-assistant-rename.git@v0.4.0
 ```
 
 Either command puts `ha-rename` on your `PATH`. To move to a newer release, run the
@@ -149,8 +149,11 @@ dashboard 'Weather' (weather)
 Needs manual fix (2):
 automation 'Heater off' (id 1700000000001)
   conditions[0].value_template: mentions sensor.skyvane_skyvane_station_backyard_station_temperature (now sensor.skyvane_station_temperature)
+  open: http://homeassistant.local:8123/config/automation/edit/1700000000001
 automation 'Garage lights' (defined in YAML)
   triggers[0].entity_id: sensor.skyvane_skyvane_station_backyard_station_temperature -> sensor.skyvane_station_temperature
+  fix in the YAML file that defines it
+  view: http://homeassistant.local:8123/config/automation/show/automation.garage_lights
 
 Dry run only; nothing changed.
 ```
@@ -197,6 +200,23 @@ and the old and new ID:
 - groups, including group helpers. Groups are found through the members they report,
   so a group that's already unavailable when you run `ha-rename` (for example because
   none of its members exist) isn't listed.
+
+Each entry ends with where to fix it:
+
+- `open:` links to the page in Home Assistant where you make the fix: the automation,
+  script, scene or person editor, a dashboard in edit mode, the energy settings, or the
+  helpers list for a group helper.
+- `fix in the YAML file that defines it` for anything defined in YAML. For YAML
+  automations, scripts and dashboards, `view:` links to their read-only page, so you
+  can see what to change. Home Assistant doesn't say which file defines them.
+- `managed by the <name> integration` for an entity whose members come from that
+  integration (such as a light group from a hub), which has no page to fix it in.
+
+Links use the same address as `--ha-url` (`ws://` becomes `http://` and `wss://`
+becomes `https://`), not Home Assistant's external URL. If no web address can be worked
+out from `--ha-url` (its path doesn't end in `/api/websocket`), the links are left out.
+Current Home Assistant releases open a scene's editor in review mode, but older ones
+apply the scene as soon as its editor opens.
 
 Fixing those doesn't change the exit code. To only rename entities, without updating
 or listing references, use `--no-update-references`.

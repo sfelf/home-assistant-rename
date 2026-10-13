@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import quote
 
 from ha_rename.client import CommandError, HomeAssistantClient
-from ha_rename.references import Edit, Target
+from ha_rename.references import Edit, Fix, Target
 
 REST_KINDS = ("automation", "script", "scene")
 # The registry platform of each kind's UI-managed entities (scenes belong to Home
@@ -50,6 +50,7 @@ async def load_targets(ha: HomeAssistantClient, entries: list[dict[str, Any]]) -
         for e in entries
         if e.get("platform") == "script" and e.get("unique_id")
     }
+    registry = {e["entity_id"]: e for e in entries}
     targets: list[Target | None] = []
     states = await ha.call({"type": "get_states"})
     for state in states:
@@ -66,7 +67,9 @@ async def load_targets(ha: HomeAssistantClient, entries: list[dict[str, Any]]) -
             targets.append(await _scene(ha, name, attributes))
         elif isinstance(attributes.get("entity_id"), list):
             config = {"entity_id": attributes["entity_id"]}
-            targets.append(Target("group", None, f"group {name!r} ({entity_id})", config, False))
+            label = f"group {name!r} ({entity_id})"
+            fix = _group_fix(registry.get(entity_id))
+            targets.append(Target("group", None, label, config, False, fix))
     # Entities disabled in the registry have no state, but their config still counts.
     with_state = {state["entity_id"] for state in states}
     for entry in entries:
@@ -78,8 +81,33 @@ async def load_targets(ha: HomeAssistantClient, entries: list[dict[str, Any]]) -
     return [t for t in targets if t is not None]
 
 
+def _group_fix(entry: dict[str, Any] | None) -> Fix:
+    """Where to fix the members of a group, or of another entity that lists its members.
+
+    ``entry`` is its registry entry. Only YAML defines entities without one: those set up
+    through config entries are always registered.
+    """
+    if entry is None:
+        return Fix(in_yaml=True)
+    if entry.get("platform") != "group":
+        return Fix(integration=entry.get("platform"))
+    if entry.get("config_entry_id"):
+        return Fix("config/helpers")  # a group helper: no link to its own options
+    return Fix(in_yaml=True)
+
+
 def _rest_path(kind: str, key: str) -> str:
     return f"/api/config/{kind}/config/{quote(key, safe='')}"
+
+
+def _edit_page(kind: str, key: str) -> Fix:
+    """The UI editor of an automation, script, scene or person."""
+    return Fix(f"config/{kind}/edit/{quote(key, safe='')}")
+
+
+def _yaml_page(kind: str, entity_id: str) -> Fix:
+    """The read-only page of an automation or script defined in YAML."""
+    return Fix(f"config/{kind}/show/{entity_id}", entity_id, in_yaml=True)
 
 
 async def _raw_config(ha: HomeAssistantClient, kind: str, entity_id: str) -> Any:
@@ -99,21 +127,26 @@ async def _automation(
         key = str(automation_id)
         config = await ha.rest("GET", _rest_path("automation", key))
         if config is not None:
-            return Target("automation", key, f"automation {name!r} (id {key})", config)
+            label = f"automation {name!r} (id {key})"
+            return Target("automation", key, label, config, fix=_edit_page("automation", key))
     config = await _raw_config(ha, "automation", entity_id)
     if config is None:
         return None
-    return Target("automation", None, f"automation {name!r} ({YAML})", config, False)
+    label = f"automation {name!r} ({YAML})"
+    return Target("automation", None, label, config, False, _yaml_page("automation", entity_id))
 
 
 async def _script(ha: HomeAssistantClient, entity_id: str, name: str, key: str) -> Target | None:
     config = await ha.rest("GET", _rest_path("script", key))
     if config is not None:
-        return Target("script", key, f"script {name!r} ({entity_id})", config)
+        label = f"script {name!r} ({entity_id})"
+        return Target("script", key, label, config, fix=_edit_page("script", key))
     config = await _raw_config(ha, "script", entity_id)
     if config is None:
         return None
-    return Target("script", None, f"script {name!r} ({YAML})", config, False)
+    return Target(
+        "script", None, f"script {name!r} ({YAML})", config, False, _yaml_page("script", entity_id)
+    )
 
 
 async def _scene(ha: HomeAssistantClient, name: str, attributes: dict[str, Any]) -> Target:
@@ -121,10 +154,12 @@ async def _scene(ha: HomeAssistantClient, name: str, attributes: dict[str, Any])
         key = str(attributes["id"])
         config = await ha.rest("GET", _rest_path("scene", key))
         if config is not None:
-            return Target("scene", key, f"scene {name!r} (id {key})", config)
+            return Target(
+                "scene", key, f"scene {name!r} (id {key})", config, fix=_edit_page("scene", key)
+            )
     # A YAML scene: its state lists the entities it sets.
     config = {"entity_id": attributes.get("entity_id") or []}
-    return Target("scene", None, f"scene {name!r} ({YAML})", config, False)
+    return Target("scene", None, f"scene {name!r} ({YAML})", config, False, Fix(in_yaml=True))
 
 
 async def _without_state(ha: HomeAssistantClient, entry: dict[str, Any]) -> Target | None:
@@ -142,7 +177,7 @@ async def _without_state(ha: HomeAssistantClient, entry: dict[str, Any]) -> Targ
         return None
     name = entry.get("name") or entry.get("original_name") or entry["entity_id"]
     where = entry["entity_id"] if kind == "script" else f"id {key}"
-    return Target(kind, key, f"{kind} {name!r} ({where})", config)
+    return Target(kind, key, f"{kind} {name!r} ({where})", config, fix=_edit_page(kind, key))
 
 
 def _dashboard_url_path(key: str) -> str | None:
@@ -169,9 +204,12 @@ async def _dashboards(ha: HomeAssistantClient) -> list[Target]:
         # The default dashboard has no panel config in storage mode.
         if (panel.get("config") or {}).get("mode") == "yaml":
             label = f"dashboard {title!r} ({where}, YAML mode)"
-            targets.append(Target("dashboard", None, label, config, False))
+            page = quote(url_path, safe="")
+            targets.append(Target("dashboard", None, label, config, False, Fix(page, in_yaml=True)))
         else:
-            targets.append(Target("dashboard", url_path, f"dashboard {title!r} ({where})", config))
+            label = f"dashboard {title!r} ({where})"
+            fix = Fix(f"{quote(url_path, safe='')}?edit=1")
+            targets.append(Target("dashboard", url_path, label, config, fix=fix))
     return targets
 
 
@@ -184,10 +222,13 @@ async def _persons(ha: HomeAssistantClient) -> list[Target]:
     targets = []
     for person in persons.get("storage", []):
         label = f"person {person['name']!r}"
-        targets.append(Target("person", person["id"], label, _person_config(person)))
+        fix = _edit_page("person", person["id"])
+        targets.append(Target("person", person["id"], label, _person_config(person), fix=fix))
     for person in persons.get("config", []):
         label = f"person {person['name']!r} ({YAML})"
-        targets.append(Target("person", None, label, _person_config(person), False))
+        targets.append(
+            Target("person", None, label, _person_config(person), False, Fix(in_yaml=True))
+        )
     return targets
 
 
@@ -198,7 +239,7 @@ async def _energy(ha: HomeAssistantClient) -> list[Target]:
         if not _is_missing(e):
             raise
         return []  # the energy dashboard hasn't been set up
-    return [Target("energy", "energy", "energy settings", prefs)]
+    return [Target("energy", "energy", "energy settings", prefs, fix=Fix("config/energy"))]
 
 
 async def fetch(ha: HomeAssistantClient, kind: str, key: str) -> Any:
