@@ -212,6 +212,29 @@ def revert_edits(config: Any, edits: Iterable[Edit]) -> EditResult:
     return apply_edits(config, [e.reversed() for e in edits], keys_first=True)
 
 
+def rebase(applied: Iterable[Edit]) -> tuple[Edit, ...]:
+    """Edits applied by :func:`revert_edits`, with paths as they were before the revert.
+
+    Paths name keys as they were before the edits they belong to. :func:`revert_edits`
+    takes and returns paths from before the original edits; recorded as edits of their
+    own (to be reverted again, e.g. to redo), they must name the keys as the revert found
+    them, i.e. the original edits' new keys.
+    """
+    applied = list(applied)
+    # Where a key was put back, as a path from before the original edits -> its key then.
+    keys = {(*e.path[:-1], e.new): e.old for e in applied if e.is_key}
+
+    def translate(path: Path) -> Path:
+        return tuple(keys.get(path[: i + 1], element) for i, element in enumerate(path))
+
+    return tuple(
+        Edit((*translate(e.path[:-1]), e.old), e.old, e.new, True)
+        if e.is_key
+        else Edit(translate(e.path), e.old, e.new)
+        for e in applied
+    )
+
+
 def _has(node: Any, element: str | int) -> bool:
     if isinstance(node, dict):
         return element in node

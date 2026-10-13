@@ -8,7 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from ha_rename import __version__
-from ha_rename.references import EDITABLE_KINDS, Edit, format_path, revert_edits, scan
+from ha_rename.references import (
+    EDITABLE_KINDS,
+    Edit,
+    format_path,
+    rebase,
+    revert_edits,
+    scan,
+)
 
 FORMAT = "ha-rename-undo"
 # Version 2 added reference updates; version 1 files only have entity changes.
@@ -424,10 +431,15 @@ def plan_reference_undo(
     ]
     result = revert_edits(current, edits)
     notes += result.notes
-    # An ID given back to its own entity is valid wherever it is, even if it's also
-    # another entity's new ID (a -> aa while aa -> aaa).
-    valid = {e.old for e in edits} if restored is None else restored
-    leftovers, _ = scan(result.config, {e.new: e.old for e in edits if e.new not in valid})
-    notes += [f"{format_path(e.path)}: still refers to {e.old}; left as is" for e in leftovers]
-    change = ReferenceChange(recorded.kind, recorded.key, recorded.label, tuple(result.applied))
+    # Locations just put back hold an old ID that's right, even if it's also another
+    # entity's new ID (a -> aa while aa -> aaa); anywhere else, it's a leftover.
+    put_back = {(*e.path[:-1], e.new) if e.is_key else e.path for e in result.applied}
+    leftovers, _ = scan(result.config, {e.new: e.old for e in edits})
+    notes += [
+        f"{format_path(e.path)}: still refers to {e.old}; left as is"
+        for e in leftovers
+        if e.path not in put_back
+    ]
+    # Recorded so this undo can itself be undone (redo).
+    change = ReferenceChange(recorded.kind, recorded.key, recorded.label, rebase(result.applied))
     return ReferenceUndoStep(recorded, change, result.config, tuple(notes))

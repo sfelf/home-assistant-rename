@@ -4,7 +4,7 @@ from dataclasses import asdict
 import pytest
 
 from ha_rename import __version__, undo
-from ha_rename.references import Edit
+from ha_rename.references import Edit, apply_edits, scan
 from ha_rename.undo import (
     Change,
     ReferenceChange,
@@ -581,6 +581,38 @@ class TestPlanReferenceUndo:
             plan_reference_undo(chain, {"entity_id": ["sensor.aa", "sensor.aaa"]}, restored).notes
             == ()
         )
+
+    def test_moved_reference_in_a_chain_is_a_leftover(self):
+        chain = ReferenceChange(
+            "automation",
+            "17",
+            "automation 'Chain' (id 17)",
+            (
+                Edit(("entity_id", 0), "sensor.a", "sensor.aa"),
+                Edit(("entity_id", 1), "sensor.aa", "sensor.aaa"),
+            ),
+        )
+        # Since the run, the first reference moved to the end.
+        current = {"entity_id": ["light.k", "sensor.aaa", "sensor.aa"]}
+        step = plan_reference_undo(chain, current)
+        assert step.config == {"entity_id": ["light.k", "sensor.aa", "sensor.aa"]}
+        assert step.notes == (
+            "entity_id[0]: changed since to 'light.k'; left as is",
+            "entity_id[2]: still refers to sensor.aa; left as is",
+        )
+
+    def test_redo_of_key_and_value_below(self):
+        original = {"entities": {"sensor.a": {"entity": "light.a"}}}
+        renames = {"sensor.a": "sensor.b", "light.a": "light.b"}
+        edits, _ = scan(original, renames)
+        after = apply_edits(original, edits).config
+        recorded = ReferenceChange("scene", "1", "scene 'S' (id 1)", tuple(edits))
+        undone = plan_reference_undo(recorded, after)
+        assert undone.config == original
+        redone = plan_reference_undo(undone.change, undone.config)
+        assert redone.notes == ()
+        assert redone.config == after
+        assert plan_reference_undo(redone.change, redone.config).config == original
 
     def test_removed(self):
         step = plan_reference_undo(REFERENCE, None)

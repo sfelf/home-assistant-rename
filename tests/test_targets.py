@@ -371,3 +371,24 @@ class TestWithoutState:
         fake_ha.automations = {"17": HEATER_OFF}
         fake_ha.scenes = {"17": {"id": "17"}}
         assert load(fake_ha, [entry]) == []
+
+
+@pytest.mark.parametrize(
+    "command", ["get_panels", "person/list", "energy/get_prefs", "automation/config"]
+)
+def test_integrations_not_loaded_have_no_targets(fake_ha, command):
+    # A minimal Home Assistant may not load the frontend, person or energy integrations.
+    fake_ha.states = [state("automation.garage", "Garage")]
+    fake_ha.fail_commands = {command: "unknown_command"}
+    assert all(t.kind != command.split("/")[0] for t in load(fake_ha))
+
+
+def test_person_fetch_when_not_loaded(fake_ha):
+    fake_ha.fail_commands = {"person/list": "unknown_command"}
+    assert run(fake_ha, lambda ha: targets.fetch(ha, "person", "alice")) is None
+
+
+def test_list_errors_are_raised(fake_ha):
+    fake_ha.fail_commands = {"person/list": "unauthorized"}
+    with pytest.raises(client.CommandError, match="unauthorized"):
+        load(fake_ha)

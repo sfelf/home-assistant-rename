@@ -23,12 +23,23 @@ REST_KINDS = ("automation", "script", "scene")
 REST_KIND_PLATFORMS = {"automation": "automation", "script": "script", "scene": "homeassistant"}
 DEFAULT_DASHBOARD = "lovelace"  # the default dashboard's panel URL path
 YAML = "defined in YAML"
-# Error codes Home Assistant uses when the thing asked for doesn't exist.
-MISSING = ("not_found", "config_not_found")
+# Error codes Home Assistant uses when the thing asked for doesn't exist, or when the
+# integration it belongs to isn't loaded (e.g. no energy or person on a minimal setup).
+MISSING = ("not_found", "config_not_found", "unknown_command")
 
 
 def _is_missing(error: CommandError) -> bool:
     return isinstance(error.error, dict) and error.error.get("code") in MISSING
+
+
+async def _call_if_loaded(ha: HomeAssistantClient, payload: dict[str, Any], default: Any) -> Any:
+    """``ha.call(payload)``, or ``default`` if its integration isn't loaded."""
+    try:
+        return await ha.call(payload)
+    except CommandError as e:
+        if not _is_missing(e):
+            raise
+        return default
 
 
 async def load_targets(ha: HomeAssistantClient, entries: list[dict[str, Any]]) -> list[Target]:
@@ -141,7 +152,7 @@ def _dashboard_url_path(key: str) -> str | None:
 
 async def _dashboards(ha: HomeAssistantClient) -> list[Target]:
     targets = []
-    for url_path, panel in (await ha.call({"type": "get_panels"})).items():
+    for url_path, panel in (await _call_if_loaded(ha, {"type": "get_panels"}, {})).items():
         if panel.get("component_name") != "lovelace":
             continue
         try:
@@ -169,7 +180,7 @@ def _person_config(person: dict[str, Any]) -> dict[str, Any]:
 
 
 async def _persons(ha: HomeAssistantClient) -> list[Target]:
-    persons = await ha.call({"type": "person/list"})
+    persons = await _call_if_loaded(ha, {"type": "person/list"}, {})
     targets = []
     for person in persons.get("storage", []):
         label = f"person {person['name']!r}"
@@ -205,7 +216,7 @@ async def fetch(ha: HomeAssistantClient, kind: str, key: str) -> Any:
             raise
         return None
     if kind == "person":
-        persons = (await ha.call({"type": "person/list"})).get("storage", [])
+        persons = (await _call_if_loaded(ha, {"type": "person/list"}, {})).get("storage", [])
         person = next((p for p in persons if p["id"] == key), None)
         return None if person is None else _person_config(person)
     raise ValueError(f"unknown target kind {kind!r}")
