@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from ha_rename import __version__, cli, undo
+from ha_rename import __version__, cli, client, undo
 from ha_rename.undo import UndoLog
 from tests.conftest import GOOD_TOKEN, SAMPLE_ENTITIES, entity, state
 
@@ -616,6 +616,9 @@ def test_python_dash_m():
 
 T_OLD = "sensor.skyvane_skyvane_station_backyard_station_temperature"
 T_NEW = "sensor.skyvane_station_temperature"
+A_OLD = "automation.skyvane_skyvane_station_backyard_station_garage"
+A_NEW = "automation.skyvane_station_garage"
+YAML_NOTE = "fix in the YAML file that defines it"
 H_OLD = "switch.skyvane_skyvane_station_backyard_station_heater"
 H_NEW = "switch.skyvane_station_heater"
 P_OLD = "device_tracker.skyvane_skyvane_station_backyard_station_phone"
@@ -736,16 +739,27 @@ class TestReferences:
         out = capsys.readouterr().out
         assert "\nReferences to update (8):\n" in out
         assert "\nNeeds manual fix (4):\n" in out
+        base = fake_ha.rest_url
         assert (
             "automation 'Heater off' (id 17)\n"
             f"  conditions[0].value_template: mentions {T_OLD} (now {T_NEW})\n"
+            f"  open: {base}/config/automation/edit/17\n"
         ) in out
         assert (
-            f"automation 'Garage' (defined in YAML)\n  triggers[0].entity_id: {T_OLD} -> {T_NEW}\n"
-            in out
-        )
-        assert "dashboard 'Garden' (garden, YAML mode)\n" in out
-        assert f"group 'Outside' (group.outside)\n  entity_id[0]: {T_OLD} -> {T_NEW}\n" in out
+            "automation 'Garage' (defined in YAML)\n"
+            f"  triggers[0].entity_id: {T_OLD} -> {T_NEW}\n"
+            f"  {YAML_NOTE}\n"
+            f"  view: {base}/config/automation/show/automation.garage\n"
+        ) in out
+        assert (
+            "dashboard 'Garden' (garden, YAML mode)\n"
+            f"  views[0].cards[0].entity: {T_OLD} -> {T_NEW}\n"
+            f"  {YAML_NOTE}\n"
+            f"  view: {base}/garden\n"
+        ) in out
+        assert (
+            f"group 'Outside' (group.outside)\n  entity_id[0]: {T_OLD} -> {T_NEW}\n  {YAML_NOTE}\n"
+        ) in out
         assert out.rstrip().endswith("Done.")
 
     def test_dry_run_output(self, fake_ha, memory_keyring, capsys):
@@ -768,9 +782,65 @@ class TestReferences:
             "Needs manual fix (1):\n"
             "automation 'Heater off' (id 17)\n"
             f"  conditions[0].value_template: mentions {T_OLD} (now {T_NEW})\n"
+            f"  open: {fake_ha.rest_url}/config/automation/edit/17\n"
             "\n"
             "Dry run only; nothing changed.\n"
         )
+
+    def yaml_automation_renamed_too(self, fake_ha):
+        """A YAML automation whose own ID matches the prefix, with a template to fix."""
+        fake_ha.entities.append(entity(A_OLD, platform="automation"))
+        fake_ha.states = [state(A_OLD, "Garage")]
+        fake_ha.raw_configs = {
+            A_OLD: {"conditions": [{"value_template": f"{{{{ is_state('{T_OLD}', 'on') }}}}"}]}
+        }
+
+    def manual_fix_lines(self, out):
+        return out[out.index("\nNeeds manual fix") :].splitlines()
+
+    def test_link_follows_the_targets_own_rename(self, fake_ha, memory_keyring, capsys):
+        self.yaml_automation_renamed_too(fake_ha)
+        assert self.run(fake_ha, memory_keyring) == 0
+        lines = self.manual_fix_lines(capsys.readouterr().out)
+        assert f"  view: {fake_ha.rest_url}/config/automation/show/{A_NEW}" in lines
+
+    def test_link_keeps_the_old_id_when_its_rename_fails(self, fake_ha, memory_keyring, capsys):
+        self.yaml_automation_renamed_too(fake_ha)
+        fake_ha.fail_updates = {A_OLD}
+        assert self.run(fake_ha, memory_keyring) == 1
+        lines = self.manual_fix_lines(capsys.readouterr().out)
+        assert f"  view: {fake_ha.rest_url}/config/automation/show/{A_OLD}" in lines
+
+    def test_dry_run_link_uses_the_new_id(self, fake_ha, memory_keyring, capsys):
+        self.yaml_automation_renamed_too(fake_ha)
+        assert self.run(fake_ha, memory_keyring, "--dry-run") == 0
+        lines = self.manual_fix_lines(capsys.readouterr().out)
+        assert f"  view: {fake_ha.rest_url}/config/automation/show/{A_NEW}" in lines
+
+    def test_no_links_without_an_http_address(self, fake_ha, memory_keyring, monkeypatch, capsys):
+        self.yaml_automation_renamed_too(fake_ha)
+
+        def no_address(url):
+            raise client.HomeAssistantError("no address")
+
+        monkeypatch.setattr(client, "rest_base_url", no_address)
+        assert self.run(fake_ha, memory_keyring) == 0
+        out = capsys.readouterr().out
+        lines = self.manual_fix_lines(out)
+        start = lines.index("automation 'Garage' (defined in YAML)")
+        assert lines[start + 1 : start + 4] == [
+            f"  conditions[0].value_template: mentions {T_OLD} (now {T_NEW})",
+            f"  {YAML_NOTE}",
+            "",
+        ]
+        assert out.rstrip().endswith("Done.")
+
+    def test_only_manual_fixes_get_links(self, fake_ha, memory_keyring, capsys):
+        populate(fake_ha)
+        assert self.run(fake_ha, memory_keyring) == 0
+        out = capsys.readouterr().out
+        updates = out[out.index("\nReferences to update") : out.index("\nNeeds manual fix")]
+        assert "open:" not in updates and "view:" not in updates
 
     def test_rejected_rename_keeps_its_references(self, fake_ha, memory_keyring, capsys):
         fake_ha.states = [state("automation.heater_off", "Heater off", id="17")]
@@ -863,6 +933,18 @@ class TestReferences:
         assert "can't work out the REST API address" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "url, base",
+    [
+        ("ws://homeassistant.local:8123/api/websocket", "http://homeassistant.local:8123"),
+        ("wss://example.org/ha/api/websocket", "https://example.org/ha"),
+        ("wss://example.org/websocket", None),
+    ],
+)
+def test_links_follow_the_connection_url(url, base):
+    assert cli._base_url(url) == base
+
+
 class TestUndoReferences:
     def apply(self, fake_ha, memory_keyring, in_tmp_dir):
         original = populate(fake_ha)
@@ -888,6 +970,7 @@ class TestUndoReferences:
         ) in out
         # Entities first, so references only go back to IDs that were given back.
         assert out.index(T_NEW + "\n  -> " + T_OLD) < out.index("energy settings")
+        assert "open:" not in out and "view:" not in out  # links are only for rename runs
 
     def test_undo_of_undo_redoes_references(self, fake_ha, memory_keyring, in_tmp_dir):
         _, path = self.apply(fake_ha, memory_keyring, in_tmp_dir)

@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from ha_rename import client, targets
-from ha_rename.references import Edit, Target
+from ha_rename.references import Edit, Fix, Target
 from tests.conftest import GOOD_TOKEN, entity, state
 
 HEATER_OFF = {
@@ -48,12 +48,14 @@ class TestAutomations:
                 "1700000000001",
                 "automation 'Heater off' (id 1700000000001)",
                 HEATER_OFF,
+                fix=Fix("config/automation/edit/1700000000001"),
             ),
             Target(
                 "automation",
                 "1700000000002",
                 "automation 'Motion light' (id 1700000000002)",
                 FROM_BLUEPRINT,
+                fix=Fix("config/automation/edit/1700000000002"),
             ),
         ]
 
@@ -64,9 +66,23 @@ class TestAutomations:
         fake_ha.raw_configs = {"automation.garage_lights": GARAGE}
         assert load(fake_ha) == [
             Target(
-                "automation", None, "automation 'Garage lights' (defined in YAML)", GARAGE, False
+                "automation",
+                None,
+                "automation 'Garage lights' (defined in YAML)",
+                GARAGE,
+                False,
+                Fix(
+                    "config/automation/show/automation.garage_lights",
+                    "automation.garage_lights",
+                    in_yaml=True,
+                ),
             )
         ]
+
+    def test_page_key_is_quoted(self, fake_ha):
+        fake_ha.states = [state("automation.odd", "Odd", id="a b/c")]
+        fake_ha.automations = {"a b/c": HEATER_OFF}
+        assert load(fake_ha)[0].fix == Fix("config/automation/edit/a%20b%2Fc")
 
     def test_without_config_is_skipped(self, fake_ha):
         fake_ha.states = [state("automation.broken")]
@@ -86,7 +102,13 @@ class TestScripts:
         fake_ha.scripts = {"morning": script}
         entries = [entity("script.good_morning", platform="script", unique_id="morning")]
         assert load(fake_ha, entries) == [
-            Target("script", "morning", "script 'Morning' (script.good_morning)", script)
+            Target(
+                "script",
+                "morning",
+                "script 'Morning' (script.good_morning)",
+                script,
+                fix=Fix("config/script/edit/morning"),
+            )
         ]
 
     def test_key_defaults_to_object_id(self, fake_ha):
@@ -99,7 +121,14 @@ class TestScripts:
         fake_ha.states = [state("script.evening", "Evening")]
         fake_ha.raw_configs = {"script.evening": {"sequence": []}}
         assert load(fake_ha) == [
-            Target("script", None, "script 'Evening' (defined in YAML)", {"sequence": []}, False)
+            Target(
+                "script",
+                None,
+                "script 'Evening' (defined in YAML)",
+                {"sequence": []},
+                False,
+                Fix("config/script/show/script.evening", "script.evening", in_yaml=True),
+            )
         ]
 
     def test_without_config_is_skipped(self, fake_ha):
@@ -112,7 +141,9 @@ class TestScenes:
         scene = {"id": "1", "name": "Evening", "entities": {"light.a_lamp": {"state": "on"}}}
         fake_ha.states = [state("scene.evening", "Evening", id="1", entity_id=["light.a_lamp"])]
         fake_ha.scenes = {"1": scene}
-        assert load(fake_ha) == [Target("scene", "1", "scene 'Evening' (id 1)", scene)]
+        assert load(fake_ha) == [
+            Target("scene", "1", "scene 'Evening' (id 1)", scene, fix=Fix("config/scene/edit/1"))
+        ]
 
     @pytest.mark.parametrize("attributes", [{}, {"id": "not-in-scenes-yaml"}])
     def test_defined_in_yaml(self, fake_ha, attributes):
@@ -124,6 +155,7 @@ class TestScenes:
                 "scene 'Night' (defined in YAML)",
                 {"entity_id": ["light.a_lamp"]},
                 False,
+                Fix(in_yaml=True),
             )
         ]
 
@@ -132,21 +164,48 @@ class TestScenes:
         assert load(fake_ha)[0].config == {"entity_id": []}
 
 
-def test_groups(fake_ha):
-    fake_ha.states = [
-        state("group.downstairs", "Downstairs", entity_id=["light.a_lamp", "light.kitchen"]),
-        state("light.kitchen", "Kitchen"),
-        state("sensor.odd", entity_id="sensor.not_a_list"),
-    ]
-    assert load(fake_ha) == [
-        Target(
-            "group",
-            None,
-            "group 'Downstairs' (group.downstairs)",
-            {"entity_id": ["light.a_lamp", "light.kitchen"]},
-            False,
-        )
-    ]
+class TestGroups:
+    MEMBERS = ["light.a_lamp", "light.kitchen"]
+
+    def load_group(self, fake_ha, entity_id, entries=()):
+        fake_ha.states = [state(entity_id, "Downstairs", entity_id=self.MEMBERS)]
+        [target] = load(fake_ha, entries)
+        return target
+
+    def test_found_by_member_list(self, fake_ha):
+        fake_ha.states = [
+            state("group.downstairs", "Downstairs", entity_id=self.MEMBERS),
+            state("light.kitchen", "Kitchen"),
+            state("sensor.odd", entity_id="sensor.not_a_list"),
+        ]
+        assert load(fake_ha) == [
+            Target(
+                "group",
+                None,
+                "group 'Downstairs' (group.downstairs)",
+                {"entity_id": self.MEMBERS},
+                False,
+                Fix(in_yaml=True),
+            )
+        ]
+
+    def test_helper(self, fake_ha):
+        entries = [entity("light.downstairs", platform="group", config_entry_id="ce1")]
+        assert self.load_group(fake_ha, "light.downstairs", entries).fix == Fix("config/helpers")
+
+    def test_yaml_platform(self, fake_ha):
+        entries = [entity("light.downstairs", platform="group", config_entry_id=None)]
+        target = self.load_group(fake_ha, "light.downstairs", entries)
+        assert target.fix == Fix(in_yaml=True)
+
+    def test_unregistered(self, fake_ha):
+        # Classic groups, and platform groups without a unique_id.
+        assert self.load_group(fake_ha, "group.downstairs").fix == Fix(in_yaml=True)
+
+    def test_managed_by_another_integration(self, fake_ha):
+        entries = [entity("light.downstairs", platform="hue", config_entry_id="ce1")]
+        target = self.load_group(fake_ha, "light.downstairs", entries)
+        assert target.fix == Fix(integration="hue")
 
 
 class TestDashboards:
@@ -161,8 +220,15 @@ class TestDashboards:
                 "lovelace",
                 "dashboard 'Overview' (default)",
                 {"views": [{"title": "Home"}]},
+                fix=Fix("lovelace?edit=1"),
             ),
-            Target("dashboard", "weather", "dashboard 'Weather' (weather)", {"views": []}),
+            Target(
+                "dashboard",
+                "weather",
+                "dashboard 'Weather' (weather)",
+                {"views": []},
+                fix=Fix("weather?edit=1"),
+            ),
         ]
 
     def test_yaml(self, fake_ha):
@@ -171,10 +237,20 @@ class TestDashboards:
         fake_ha.panels["garden"]["title"] = None
         assert load(fake_ha) == [
             Target(
-                "dashboard", None, "dashboard 'Overview' (default, YAML mode)", {"views": []}, False
+                "dashboard",
+                None,
+                "dashboard 'Overview' (default, YAML mode)",
+                {"views": []},
+                False,
+                Fix("lovelace", in_yaml=True),
             ),
             Target(
-                "dashboard", None, "dashboard 'garden' (garden, YAML mode)", {"views": []}, False
+                "dashboard",
+                None,
+                "dashboard 'garden' (garden, YAML mode)",
+                {"views": []},
+                False,
+                Fix("garden", in_yaml=True),
             ),
         ]
 
@@ -194,10 +270,19 @@ class TestPersons:
         }
         assert load(fake_ha) == [
             Target(
-                "person", "alice", "person 'Alice'", {"device_trackers": ["device_tracker.a_phone"]}
+                "person",
+                "alice",
+                "person 'Alice'",
+                {"device_trackers": ["device_tracker.a_phone"]},
+                fix=Fix("config/person/edit/alice"),
             ),
             Target(
-                "person", None, "person 'Bob' (defined in YAML)", {"device_trackers": []}, False
+                "person",
+                None,
+                "person 'Bob' (defined in YAML)",
+                {"device_trackers": []},
+                False,
+                Fix(in_yaml=True),
             ),
         ]
 
@@ -205,7 +290,9 @@ class TestPersons:
 class TestEnergy:
     def test_configured(self, fake_ha):
         fake_ha.energy = {"energy_sources": [{"type": "grid"}], "device_consumption": []}
-        assert load(fake_ha) == [Target("energy", "energy", "energy settings", fake_ha.energy)]
+        assert load(fake_ha) == [
+            Target("energy", "energy", "energy settings", fake_ha.energy, fix=Fix("config/energy"))
+        ]
 
     def test_not_set_up(self, fake_ha):
         assert load(fake_ha) == []
@@ -346,9 +433,27 @@ class TestWithoutState:
             entity("scene.evening", platform="homeassistant", unique_id="1"),
         ]
         assert load(fake_ha, entries) == [
-            Target("automation", "17", "automation 'Heater off' (id 17)", HEATER_OFF),
-            Target("script", "morning", "script 'Morning' (script.good_morning)", {"sequence": []}),
-            Target("scene", "1", "scene 'scene.evening' (id 1)", {"id": "1", "entities": {}}),
+            Target(
+                "automation",
+                "17",
+                "automation 'Heater off' (id 17)",
+                HEATER_OFF,
+                fix=Fix("config/automation/edit/17"),
+            ),
+            Target(
+                "script",
+                "morning",
+                "script 'Morning' (script.good_morning)",
+                {"sequence": []},
+                fix=Fix("config/script/edit/morning"),
+            ),
+            Target(
+                "scene",
+                "1",
+                "scene 'scene.evening' (id 1)",
+                {"id": "1", "entities": {}},
+                fix=Fix("config/scene/edit/1"),
+            ),
         ]
 
     def test_entities_with_a_state_are_not_loaded_twice(self, fake_ha):

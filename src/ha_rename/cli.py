@@ -274,13 +274,14 @@ async def run(
             failures += len(failed)
             if plans:
                 accepted = {
-                    i.change.entity_id
+                    i.change.entity_id: i.change.new_entity_id
                     for i in items
                     if isinstance(i.change, Change)
                     and i.change.renames_entity
                     and i.change not in failed
                 }
-                failures += await _update_references(ha, keep_accepted(plans, accepted), log)
+                kept = keep_accepted(plans, set(accepted))
+                failures += await _update_references(ha, kept, accepted, _base_url(url), log)
             if references:
                 restored = {
                     step.recorded.entity_id
@@ -337,12 +338,25 @@ async def _undo_references(
     return skipped + len(await _apply(ha, items, log))
 
 
+def _base_url(url: str) -> str | None:
+    """Home Assistant's HTTP address for links, or None if it can't be worked out."""
+    try:
+        return client.rest_base_url(url)
+    except client.HomeAssistantError:
+        return None
+
+
 async def _update_references(
-    ha: client.HomeAssistantClient, plans: list[TargetPlan], log: UndoLog | None
+    ha: client.HomeAssistantClient,
+    plans: list[TargetPlan],
+    renames: dict[str, str],
+    base_url: str | None,
+    log: UndoLog | None,
 ) -> int:
     """Print and (unless dry run) apply the reference updates, then list the manual fixes.
 
-    Returns the number of failures.
+    ``renames`` maps the accepted renames' old entity IDs to their new ones, so links
+    follow them; ``base_url`` is where links point. Returns the number of failures.
     """
     updates = [plan for plan in plans if plan.edits]
     failed: list[Recorded] = []
@@ -363,6 +377,8 @@ async def _update_references(
             print(plan.target.label)
             for reference in plan.manual:
                 print(f"  {reference.describe()}")
+            for line in plan.target.fix.describe(base_url, renames):
+                print(f"  {line}")
     return len(failed)
 
 
