@@ -28,8 +28,9 @@ uv run ruff format
 ```
 
 - `uv run pytest` runs the test suite with a coverage report. The tests use a fake
-  Home Assistant WebSocket server and an in-memory keyring, so they never touch a real
-  instance or your real keyring.
+  Home Assistant (a WebSocket server, plus a REST server for the automation, script and
+  scene config endpoints) and an in-memory keyring, so they never touch a real instance
+  or your real keyring.
 - [Ruff](https://docs.astral.sh/ruff/) checks the code (`ruff check`; add `--fix` to
   apply fixes) and formats it (`ruff format`).
 
@@ -41,7 +42,10 @@ All code lives in `src/ha_rename/`:
 
 - `cli.py`: command-line parsing and the main program flow
 - `rename.py`: works out which entities to rename and how (no I/O)
-- `client.py`: minimal Home Assistant WebSocket API client
+- `references.py`: finds and rewrites references to renamed entity IDs in configs (no I/O)
+- `targets.py`: reads and saves the places that refer to entities (automations,
+  scripts, scenes, dashboards, persons, energy settings) through Home Assistant's APIs
+- `client.py`: minimal Home Assistant API client (WebSocket commands, plus REST requests)
 - `credentials.py`: saves the access token in the system keyring and prompts for it
 - `undo.py`: records applied changes in undo files and works out how to reverse them
 
