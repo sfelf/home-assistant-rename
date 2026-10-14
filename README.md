@@ -13,10 +13,10 @@
 
 Bulk-rename [Home Assistant](https://www.home-assistant.io/) entities from the command line.
 
-Some integrations create entities with long, repetitive IDs and names. For example,
-a weather-station integration can produce entities like `sensor.skyvane_skyvane_station_backyard_station_temperature`
-named "Backyard Station Temperature". Renaming dozens of these by hand in the UI is tedious.
-`ha-rename` does it in one command through Home Assistant's WebSocket API.
+Some integrations create entities with long, repetitive IDs and names, such as
+`sensor.skyvane_skyvane_station_backyard_station_temperature` named "Backyard Station
+Temperature". `ha-rename` fixes dozens of them in one command through Home Assistant's
+WebSocket API.
 
 ## What it does
 
@@ -40,10 +40,9 @@ Details:
   become empty are left alone.
 - Entities whose name comes from their device (`has_entity_name`) are flagged in the
   output. To change those names, rename the device in Home Assistant instead.
-- Entities that don't match `--old-id-prefix` are never touched.
-- If one update fails (for example because the new entity ID is already taken), the
-  error is printed and the remaining entities are still processed. The exit code is
-  then 1. References to an entity whose rename failed are left alone.
+- If an update fails (for example because the new entity ID is already taken), the
+  error is printed and the remaining entities are still processed. References to an
+  entity whose rename failed are left alone.
 
 Changes are applied by default. **Always run with `--dry-run` first** to check what
 will change. Every run that changes something also saves an
@@ -57,26 +56,21 @@ will change. Every run that changes something also saves an
 
 ## Installation
 
-Install a release (see [Releases](https://github.com/sfelf/home-assistant-rename/releases)
-for the latest version) with [uv](https://docs.astral.sh/uv/):
+Install with [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/):
 
 ```bash
-uv tool install git+https://github.com/sfelf/home-assistant-rename.git@v0.4.0
+uv tool install git+https://github.com/sfelf/home-assistant-rename.git
 ```
-
-Or with [pipx](https://pipx.pypa.io/):
 
 ```bash
-pipx install git+https://github.com/sfelf/home-assistant-rename.git@v0.4.0
+pipx install git+https://github.com/sfelf/home-assistant-rename.git
 ```
 
-Either command puts `ha-rename` on your `PATH`. To move to a newer release, run the
-same command with the new version and `--force`, for example
-`uv tool install --force git+https://github.com/sfelf/home-assistant-rename.git@v0.4.0`.
-
-To try the latest unreleased changes instead, leave off the `@v…` suffix. Each release
-also has a wheel attached, which you can install directly with
-`uv tool install <wheel URL>`.
+Either puts `ha-rename` on your `PATH`. To install a specific
+[release](https://github.com/sfelf/home-assistant-rename/releases), add its tag to the
+URL (`...home-assistant-rename.git@vX.Y.Z`). To upgrade, rerun the command with
+`--force`. Each release also has a wheel attached, which `uv tool install <wheel URL>`
+can install.
 
 ## Getting an access token
 
@@ -88,20 +82,15 @@ also has a wheel attached, which you can install directly with
 3. Under **Long-lived access tokens**, click **Create token**, give it a name
    (e.g. `ha-rename`), and copy the token. Home Assistant only shows it once.
 
-The first time you run `ha-rename` against a Home Assistant URL, it asks for the
-token. Your input is hidden. Once Home Assistant accepts the token, it is saved in
-your operating system's keyring (macOS Keychain, Windows Credential Manager, or the
-Secret Service/KWallet on Linux) and reused on later runs. Tokens are stored per URL
-under the service name `ha-rename`, so you can use several Home Assistant instances.
+The first time you run `ha-rename` against a Home Assistant URL, it asks for the token
+(input is hidden). Once Home Assistant accepts it, it's saved in your operating
+system's keyring (macOS Keychain, Windows Credential Manager, or Secret
+Service/KWallet on Linux) under the service name `ha-rename`, one per URL, so you can
+use several instances. Rejected tokens aren't saved.
 
-If a token is rejected, it is not saved. If a saved token stops working (for example
-because you deleted it in Home Assistant), rerun with `--reset-token` to enter a new
-one. To remove a saved token completely, delete the `ha-rename` entry in your
-keyring app, or run:
-
-```bash
-uvx keyring del ha-rename ws://homeassistant.local:8123/api/websocket
-```
+If a saved token stops working, rerun with `--reset-token`. To remove one, delete the
+`ha-rename` entry in your keyring app or run
+`uvx keyring del ha-rename ws://homeassistant.local:8123/api/websocket`.
 
 ## Usage
 
@@ -180,16 +169,20 @@ After renaming, `ha-rename` updates references to the renamed entity IDs in:
 - persons created in the UI (their tracked devices)
 - the energy dashboard settings
 
-Only values that are exactly a renamed entity ID are changed. Entity IDs that weren't
-renamed are never touched, even when they share a prefix
-(`sensor.skyvane_station_temperature_max` stays as it is). An action that calls a
-script, such as `action: script.morning`, names the script itself rather than its
-entity, so it isn't changed either. Everything else in an automation, script, scene or
-dashboard stays as it was.
+Only values that are exactly a renamed entity ID are changed. IDs that merely share a
+prefix (`sensor.skyvane_station_temperature_max`) and script calls such as
+`action: script.morning` are left alone, as is everything else in the config.
 
-The output lists every update under **References to update**. Under **Needs manual
-fix**, it lists references it found but won't or can't change, each with where it is
-and the old and new ID:
+Saving works like saving in Home Assistant's own editors:
+
+- Saving an automation, script or scene rewrites its whole YAML file, so comments and
+  custom formatting in that file are lost.
+- Each saved automation, script or scene is reloaded, restarting it if it's running.
+- Don't edit the same automation, script or dashboard in the UI while `ha-rename` runs:
+  one of the two edits would be lost.
+
+**Needs manual fix** lists references the tool found but won't or can't change, with
+the old and new ID and where to fix it:
 
 - entity IDs inside templates or other text, such as
   `{{ states('sensor.skyvane_skyvane_station_backyard_station_temperature') }}`
@@ -197,9 +190,15 @@ and the old and new ID:
   example in packages), YAML-mode dashboards and persons defined in YAML
 - references that can't be changed where they are, such as a scene that already has an
   entry for the new ID
-- groups, including group helpers. Groups are found through the members they report,
-  so a group that's already unavailable when you run `ha-rename` (for example because
-  none of its members exist) isn't listed.
+- groups, including group helpers
+
+Not checked at all: template entities and other UI helpers (apart from groups),
+templates that build entity IDs from text, and tools outside Home Assistant such as
+Node-RED. Helpers that follow a single entity, such as derivative or utility meter
+sensors, are updated by Home Assistant itself.
+
+<details>
+<summary>More about manual-fix entries</summary>
 
 Each entry ends with where to fix it:
 
@@ -207,109 +206,73 @@ Each entry ends with where to fix it:
   script, scene or person editor, a dashboard in edit mode, the energy settings, or the
   helpers list for a group helper.
 - `fix in the YAML file that defines it` for anything defined in YAML. For YAML
-  automations, scripts and dashboards, `view:` links to their read-only page, so you
-  can see what to change. Home Assistant doesn't say which file defines them.
+  automations, scripts and dashboards, `view:` links to their read-only page. Home
+  Assistant doesn't say which file defines them.
 - `managed by the <name> integration` for an entity whose members come from that
   integration (such as a light group from a hub), which has no page to fix it in.
 
-Links use the same address as `--ha-url` (`ws://` becomes `http://` and `wss://`
-becomes `https://`), not Home Assistant's external URL. If no web address can be worked
-out from `--ha-url` (its path doesn't end in `/api/websocket`), the links are left out.
-Current Home Assistant releases open a scene's editor in review mode, but older ones
-apply the scene as soon as its editor opens.
+Links use the same address as `--ha-url` (`ws://` becomes `http://`, `wss://` becomes
+`https://`), not Home Assistant's external URL. If `--ha-url`'s path doesn't end in
+`/api/websocket`, links are left out. Current Home Assistant releases open a scene's
+editor in review mode, but older ones apply the scene as soon as its editor opens.
 
-Fixing those doesn't change the exit code. To only rename entities, without updating
-or listing references, use `--no-update-references`.
+Groups are found through the members they report, so a group that's already
+unavailable (for example because none of its members exist) isn't listed.
 
-Some places can't be checked at all: template entities and other helpers set up in the
-UI (apart from groups), templates that build entity IDs from text, and tools outside
-Home Assistant such as Node-RED. Helpers that follow a single entity, such as
-derivative or utility meter sensors, are updated by Home Assistant itself.
-
-Saving works like saving in Home Assistant's own editors:
-
-- Saving an automation, script or scene rewrites its whole YAML file
-  (`automations.yaml`, `scripts.yaml` or `scenes.yaml`), so comments and custom
-  formatting in that file are lost, just as when you save in the UI editor.
-- Each saved automation, script or scene is reloaded. A running automation or script is
-  restarted.
-- Avoid editing the same automation, script or dashboard in the UI while `ha-rename`
-  runs: one of the two edits would be lost.
+</details>
 
 ### Undoing changes
 
-Every run that changes something saves an undo file listing each change sent to Home
-Assistant: the entity ID and name before and after, and each updated reference with
-its old and new value. It's a [JSON Lines](https://jsonlines.org/)
-file, with one line added per change. By default it's
-`ha-rename-undo-<date>-<time>.jsonl` in the current directory; choose another location
-with `--undo-file`. The file doesn't contain your access token. Dry runs, and runs that
-change nothing, don't save one.
+Every run that changes something saves a [JSON Lines](https://jsonlines.org/) undo
+file recording each change: entity IDs and names before and after, and each updated
+reference. It doesn't contain your access token. Dry runs and runs that change nothing
+don't save one.
 
-To reverse a run, pass its undo file to `--undo` (add `--dry-run` to preview):
+To reverse a run, pass its undo file to `--undo` (add `--dry-run` to preview). The
+output uses the same format as a rename:
 
 ```bash
 ha-rename --undo ha-rename-undo-20261011-224433.jsonl
 ```
 
-```
-Undoing 5 change(s) from ha-rename-undo-20261011-224433.jsonl
+- Entities are matched by Home Assistant's internal registry ID, so undo still finds
+  an entity you've renamed since, and never touches a different entity that has taken
+  over its old ID.
+- If you've changed an entity's ID or name since the run, your change is kept and the
+  output says so. Entities, automations and other places that no longer exist are
+  skipped and reported.
+- References are put back by their position in the config (such as
+  `actions[0].target.entity_id`), wherever that position still has the new ID. If
+  you've added or reordered actions since, whatever is now at that position is changed,
+  so check the output: it lists anywhere else the new ID is still used.
+- The undo run saves its own undo file, so you can redo the original changes.
+- Each change is written to the undo file before it's sent, so a run that stops partway
+  (for example because the connection drops) can still be undone. Changes that never
+  got applied show as "nothing to undo".
 
-sensor.skyvane_station_humidity
-  -> sensor.skyvane_skyvane_station_backyard_station_humidity
-switch.skyvane_station_heater
-  -> switch.skyvane_skyvane_station_backyard_station_heater
-  name: 'Heater' -> 'Backyard Station Heater'
-sensor.skyvane_station_temperature
-  -> sensor.skyvane_skyvane_station_backyard_station_temperature
-  name: 'Temperature' -> (integration's name)
-dashboard 'Weather' (weather)
-  views[0].cards[0].entity: sensor.skyvane_station_temperature -> sensor.skyvane_skyvane_station_backyard_station_temperature
-automation 'Heater off' (id 1700000000001)
-  triggers[0].entity_id: sensor.skyvane_station_temperature -> sensor.skyvane_skyvane_station_backyard_station_temperature
-  actions[0].target.entity_id: switch.skyvane_station_heater -> switch.skyvane_skyvane_station_backyard_station_heater
+<details>
+<summary>More about undo</summary>
 
-Undo file: ha-rename-undo-20261011-224510.jsonl
-To reverse these changes, run: ha-rename --undo ha-rename-undo-20261011-224510.jsonl
-
-Done.
-```
-
-- Entities are renamed back first (newest first), then references are put back. It
-  connects to the Home Assistant URL recorded in the undo file unless you pass
-  `--ha-url`.
-- A reference is put back only where it still has the new ID, and only if its entity got
-  its old ID back. If you've changed it since, or another entity has taken the old ID,
-  it's left as is and the output says so. If the target still refers to the new ID
-  somewhere else (for example in an action you've moved since), that's listed too, so
-  you can fix it by hand. References added after the run, for example in a new
-  automation, aren't changed.
+- Entities are renamed back first (newest first), then references are put back.
+- A reference is put back only if its entity got its old ID back. References added
+  elsewhere after the run, for example in a new automation, aren't changed.
 - Names are restored exactly. A name that came from the integration, shown as
   `(integration's name)`, goes back to following the integration rather than being
   fixed to a copy of the old text.
-- Entities are matched by Home Assistant's internal registry ID, which doesn't change
-  when an entity is renamed. Undo still finds an entity whose ID you've changed since,
-  and never touches a different entity that has since taken over the same ID.
-- If you've changed an entity's ID or name yourself since, your change is kept and the
-  output says so. Entities, automations and other places that no longer exist are
-  skipped and reported, and the exit code is 1, with `--dry-run` too, so a script can
-  check before undoing.
-- The undo run saves its own undo file, so you can redo the original changes.
 - Undo files from `ha-rename` 0.2.0 still work. Files written by 0.3.0 and later can't
   be read by 0.2.0.
-- Each change is written to the undo file before it's sent, so if a run stops partway
-  (for example because the connection drops), the undo file still covers every change
-  that may have been applied. Any that weren't are shown as "nothing to undo".
+
+</details>
 
 ### Options
 
 | Option | Required | Description |
 | --- | --- | --- |
 | `--old-id-prefix PREFIX` | yes, unless `--undo` | Entity ID prefix to match and replace, e.g. `skyvane_skyvane_station_backyard_station_`. Matched against the part of the ID after `<domain>.`. Lowercase letters, digits and underscores only. |
-| `--new-id-prefix PREFIX` | yes, unless `--undo` | Replacement for the old prefix, e.g. `skyvane_station_`. Pass `""` to remove the old prefix. Lowercase letters, digits and underscores only. Must end with `_` exactly when `--old-id-prefix` does; otherwise the tool stops with an error, since the IDs would run together (`skyvane_stationtemperature`) or get a double underscore. |
+| `--new-id-prefix PREFIX` | yes, unless `--undo` | Replacement for the old prefix, e.g. `skyvane_station_`, or `""` to remove it. Lowercase letters, digits and underscores only. Must end with `_` exactly when `--old-id-prefix` does. |
 | `--entity-name-prefix TEXT` | yes, unless `--undo` | Text to remove from the start of matching entity names, e.g. `"Backyard Station"`. Quote it if it contains spaces. |
-| `--no-update-references` | no | Only rename entities: don't update or list references to them. See [Updating references](#updating-references). |
-| `--undo FILE` | no | Reverse the changes recorded in an undo file instead of renaming. Can't be combined with the three prefix options or `--no-update-references`. See [Undoing changes](#undoing-changes). |
+| `--no-update-references` | no | Only rename entities: don't update or list references to them. |
+| `--undo FILE` | no | Reverse the changes recorded in an undo file instead of renaming. Can't be combined with the three prefix options or `--no-update-references`. |
 | `--undo-file PATH` | no | Where to save the undo file. Default: `ha-rename-undo-<date>-<time>.jsonl` in the current directory. An existing file is never overwritten; the run stops before changing anything. |
 | `--ha-url URL` | no | Home Assistant WebSocket API URL. Default: `ws://homeassistant.local:8123/api/websocket`, or with `--undo` the URL recorded in the undo file. Use `wss://<host>/api/websocket` if Home Assistant is served over HTTPS (e.g. via Nabu Casa or a reverse proxy). |
 | `--dry-run` | no | Show what would change without changing anything. |
@@ -323,7 +286,7 @@ Done.
 | Code | Meaning |
 | --- | --- |
 | 0 | Success (or dry run completed) |
-| 1 | An error occurred: connection, authentication, keyring, undo file, one or more failed updates (of entities or references), or changes skipped by `--undo` (also with `--dry-run`). References listed under "Needs manual fix" don't count. |
+| 1 | An error occurred: connection, authentication, keyring, undo file, one or more failed updates (of entities or references), or changes skipped by `--undo` (also with `--dry-run`, so a script can check before undoing). References listed under "Needs manual fix" don't count. |
 | 2 | Invalid command-line arguments |
 | 130 | Cancelled with Ctrl-C |
 
