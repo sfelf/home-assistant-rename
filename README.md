@@ -56,20 +56,21 @@ will change. Every run that changes something also saves an
 
 ## Installation
 
-Install a [release](https://github.com/sfelf/home-assistant-rename/releases) with
-[uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/):
+Install with [uv](https://docs.astral.sh/uv/) or [pipx](https://pipx.pypa.io/):
 
 ```bash
-uv tool install git+https://github.com/sfelf/home-assistant-rename.git@v0.4.0
+uv tool install git+https://github.com/sfelf/home-assistant-rename.git
 ```
 
 ```bash
-pipx install git+https://github.com/sfelf/home-assistant-rename.git@v0.4.0
+pipx install git+https://github.com/sfelf/home-assistant-rename.git
 ```
 
-Either puts `ha-rename` on your `PATH`. To upgrade, rerun the command with the new
-version and `--force`. Leave off `@v…` to get the latest unreleased changes. Each
-release also has a wheel attached, which `uv tool install <wheel URL>` can install.
+Either puts `ha-rename` on your `PATH`. To install a specific
+[release](https://github.com/sfelf/home-assistant-rename/releases), add its tag to the
+URL (`...home-assistant-rename.git@vX.Y.Z`). To upgrade, rerun the command with
+`--force`. Each release also has a wheel attached, which `uv tool install <wheel URL>`
+can install.
 
 ## Getting an access token
 
