@@ -238,8 +238,13 @@ ha-rename --undo ha-rename-undo-20261011-224433.jsonl
 - Entities are matched by Home Assistant's internal registry ID, so undo still finds
   an entity you've renamed since, and never touches a different entity that has taken
   over its old ID.
-- Anything you've changed yourself since the run is kept, and the output says so.
-  Entities, automations and other places that no longer exist are skipped and reported.
+- If you've changed an entity's ID or name since the run, your change is kept and the
+  output says so. Entities, automations and other places that no longer exist are
+  skipped and reported.
+- References are put back by their position in the config (such as
+  `actions[0].target.entity_id`), wherever that position still has the new ID. If
+  you've added or reordered actions since, whatever is now at that position is changed,
+  so check the output: it lists anywhere else the new ID is still used.
 - The undo run saves its own undo file, so you can redo the original changes.
 - Each change is written to the undo file before it's sent, so a run that stops partway
   (for example because the connection drops) can still be undone. Changes that never
@@ -249,10 +254,8 @@ ha-rename --undo ha-rename-undo-20261011-224433.jsonl
 <summary>More about undo</summary>
 
 - Entities are renamed back first (newest first), then references are put back.
-- A reference is put back only where it still has the new ID, and only if its entity
-  got its old ID back. If the target still refers to the new ID somewhere else (for
-  example in an action you've moved since), that's listed so you can fix it by hand.
-  References added after the run, for example in a new automation, aren't changed.
+- A reference is put back only if its entity got its old ID back. References added
+  elsewhere after the run, for example in a new automation, aren't changed.
 - Names are restored exactly. A name that came from the integration, shown as
   `(integration's name)`, goes back to following the integration rather than being
   fixed to a copy of the old text.
